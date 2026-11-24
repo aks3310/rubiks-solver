@@ -400,7 +400,8 @@ def cmd_calibrate_colours(cfg, args):
         except ValueError as e:
             print(f"Calibration failed: {e}")
             sys.exit(2)
-        print("detected cube (check it matches the real cube):\n" + net(state))
+        print("detected cube (check it matches the real cube):\n"
+              + net(state, colours=True, ansi=sys.stdout.isatty()))
     else:
         refs = references_from_solved(obs)
     save_json(cfg_path(cfg, "colours"), refs)
@@ -429,7 +430,7 @@ def cmd_solve(cfg, args):
         samples = run_scan(cfg, robot, cam, rois, steps, HERE / "logs" / stamp)
         t1 = time.time()
         original, conf = classify(collect_observations(samples, steps), refs)
-        print("detected scramble:\n" + net(original))
+        print("detected scramble:\n" + net(original, colours=True, ansi=sys.stdout.isatty()))
         worst = sorted(conf.items(), key=lambda kv: -kv[1])[:3]
         print("least certain stickers:", ", ".join(f"{facelet_name(p)} ({c:.0f})" for p, c in worst))
         try:

@@ -142,16 +142,39 @@ def describe(name: str) -> str:
     return f"{name}: {_FACE_WORD[name[0]]} face, {kind}{tail}"
 
 
-def net(state: str) -> str:
-    """Text drawing of a state as an unfolded cube (U on top, then L F R B, then D)."""
-    f = {face: state[i * 9:(i + 1) * 9] for i, face in enumerate(FACES)}
+# Sticker colour of each face when the cube is loaded white up, green front.
+COLOUR_LETTER = {"U": "W", "R": "R", "F": "G", "D": "Y", "L": "O", "B": "B"}
+_ANSI = {"U": "97", "R": "91", "F": "92", "D": "93", "L": "38;5;208", "B": "94"}
+
+
+def net(state: str, colours: bool = False, ansi: bool = False) -> str:
+    """Text drawing of a state as an unfolded cube (U on top, then L F R B, then D).
+
+    colours: show sticker colours (W white, R red, G green, Y yellow, O orange,
+             B blue) instead of face letters, with the faces labelled.
+    ansi:    also colour each letter for a terminal."""
+    def cell(x: str) -> str:
+        if not colours:
+            return x
+        c = COLOUR_LETTER[x]
+        return f"\033[1;{_ANSI[x]}m{c}\033[0m" if ansi else c
+
+    f = {face: [cell(x) for x in state[i * 9:(i + 1) * 9]] for i, face in enumerate(FACES)}
     rows = []
+    if colours:
+        rows.append("       top")
     for r in range(3):
-        rows.append("      " + " ".join(f["U"][r * 3:r * 3 + 3]))
+        rows.append("       " + " ".join(f["U"][r * 3:r * 3 + 3]))
     for r in range(3):
         rows.append("  ".join(" ".join(f[x][r * 3:r * 3 + 3]) for x in "LFRB"))
     for r in range(3):
-        rows.append("      " + " ".join(f["D"][r * 3:r * 3 + 3]))
+        rows.append("       " + " ".join(f["D"][r * 3:r * 3 + 3]))
+    if colours:
+        rows.append("       bottom")
+        rows.insert(4, "left   front  right  back")
+        rows.insert(4, "")
+        rows.append("(W white, R red, G green, Y yellow, O orange, B blue; "
+                    "held white up, green front)")
     return "\n".join(rows)
 
 
