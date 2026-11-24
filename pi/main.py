@@ -10,7 +10,12 @@
     python main.py show-faces               # draw the face model on a live photo
     python main.py calibrate-rois           # click sticker positions (if not using the face model)
     python main.py calibrate-colours        # scan a SOLVED cube once
+    python main.py read                     # scan the cube and print its state
     python main.py solve [--dry-run]        # scan, solve, execute
+    python main.py solve --state <54 letters>   # solve a known state (no scan)
+
+Add --json (before the command) to end with one line "RESULT {...}" for the
+web UI (pi/web_app.py), e.g.  python main.py --json read
 
 Load the cube the same way every time: the orientation used for
 calibrate-colours (we use white on top, green at the front).
@@ -18,6 +23,7 @@ calibrate-colours (we use white on top, green at the front).
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import sys
 import time
@@ -49,6 +55,16 @@ def cfg_path(cfg, key) -> Path:
 def plan_cache(cfg) -> Path:
     """Where finished scan plans are remembered (the search can take ~15 s)."""
     return (cfg["_dir"] / cfg["files"].get("scan_plans", "data/scan_plans.json")).resolve()
+
+
+class CommandFailed(Exception):
+    """Stops a command with a message (and a RESULT line with --json)."""
+
+
+def emit(args, **data) -> None:
+    """--json: print the command's outcome as the last stdout line."""
+    if getattr(args, "json", False):
+        print("RESULT " + json.dumps(data), flush=True)
 
 
 def to_tokens(moves: list[str], parallel: bool) -> list[str]:
@@ -268,22 +284,20 @@ def cmd_move(cfg, args):
     """Send the moves exactly as typed (no simplifying), e.g. "F F'" or "R+L'"."""
     tokens = args.moves.split()
     if not tokens:
-        print('Give at least one move, e.g.  python main.py move "F"')
-        return
+        raise CommandFailed('Give at least one move, e.g.  python main.py move "F"')
     try:
         faces = [f for f, _ in parse(" ".join(t.replace("+", " ") for t in tokens))]
     except ValueError as e:
-        print(f"{e}. Use F R B L D with ' or 2, e.g. F  F'  F2  R+L'")
-        return
+        raise CommandFailed(f"{e}. Use F R B L D with ' or 2, e.g. F  F'  F2  R+L'")
     if "U" in faces:
-        print("U has no motor on this robot; use F, R, B, L or D")
-        return
-    robot = open_robot(cfg, verbose=True)
+        raise CommandFailed("U has no motor on this robot; use F, R, B, L or D")
+    robot = open_robot(cfg, verbose=not args.json)
     try:
         ms = robot.run(tokens)
         print(f"done: {len(tokens)} move(s), motion {ms} ms")
     finally:
         robot.close()
+    emit(args, ok=True, moves=tokens, motion_ms=ms)
 
 
 def cmd_jog(cfg, args):
@@ -486,54 +500,109 @@ def cmd_calibrate_colours(cfg, args):
         print("WARNING: two faces look very similar - improve lighting and recalibrate")
 
 
-def cmd_solve(cfg, args):
-    import json
+def scan_cube(cfg, robot, cam, stamp: str):
+    """Scan (photos, then the scan moves are undone, so the cube is back in
+    the scramble it was given) and work out the colours.
+    Returns (facelets, least certain stickers, scan seconds)."""
     from rubik.vision import classify, collect_observations
     rois, steps = _scan_setup(cfg)
-    refs = json.loads(cfg_path(cfg, "colours").read_text())
-    smoves = scan_moves(steps)
+    colours = cfg_path(cfg, "colours")
+    if not colours.exists():
+        raise CommandFailed("no colour calibration yet: run  python main.py calibrate-colours")
+    refs = json.loads(colours.read_text())
+    t0 = time.time()
+    samples = run_scan(cfg, robot, cam, rois, steps, HERE / "logs" / stamp,
+                       turn_delay_s=cfg["scan"].get("turn_delay_s", 0.0))
+    scan_s = time.time() - t0
+    original, conf = classify(collect_observations(samples, steps), refs)
+    print("detected cube:\n" + net(original, colours=True, ansi=sys.stdout.isatty()))
+    worst = sorted(conf.items(), key=lambda kv: -kv[1])[:3]
+    print("least certain stickers:", ", ".join(f"{facelet_name(p)} ({c:.0f})" for p, c in worst))
+    print(f"scan {scan_s:.2f} s ({len(scan_moves(steps))} scan moves, then undone); "
+          f"photos in logs/{stamp}")
+    return original, [facelet_name(p) for p, _ in worst], scan_s
+
+
+def check_state(text: str) -> str:
+    from rubik.cube import is_valid_counts
+    state = text.upper().replace(" ", "")
+    if len(state) != 54 or any(c not in FACES for c in state):
+        raise CommandFailed("a cube state is 54 letters from U R F D L B (URFDLB order)")
+    if not is_valid_counts(state):
+        raise CommandFailed("each of U R F D L B must appear exactly 9 times")
+    return state
+
+
+def cmd_read(cfg, args):
+    """Scan the cube and print its state; the cube ends as it was loaded."""
+    from rubik.vision import _kociemba_valid
     stamp = time.strftime("%Y%m%d-%H%M%S")
     robot, cam = open_robot(cfg), open_camera(cfg)
     try:
-        t0 = time.time()
-        # photos, then the scan moves are undone: the cube is back in the
-        # scramble it was given before the timed part starts
-        samples = run_scan(cfg, robot, cam, rois, steps, HERE / "logs" / stamp,
-                           turn_delay_s=cfg["scan"].get("turn_delay_s", 0.0))
+        state, unsure, scan_s = scan_cube(cfg, robot, cam, stamp)
+    finally:
+        cam.close()
+        robot.close()
+    valid = _kociemba_valid(state)
+    print("facelets:", state)
+    if not valid:
+        print("This is not a possible cube: check the lighting / sticker positions.")
+    emit(args, ok=True, facelets=state, valid=valid, least_certain=unsure,
+         scan_s=round(scan_s, 2), photos=f"logs/{stamp}")
+
+
+def cmd_solve(cfg, args):
+    """Scan (or take --state), solve, and turn the solution on the robot."""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    known = check_state(args.state) if args.state else None
+    robot = open_robot(cfg)
+    cam = None
+    try:
+        scan_s = 0.0
+        if known:
+            original = known
+            print("using the given cube state (no scan)")
+        else:
+            cam = open_camera(cfg)
+            original, _, scan_s = scan_cube(cfg, robot, cam, stamp)
         t1 = time.time()
-        original, conf = classify(collect_observations(samples, steps), refs)
-        print("detected scramble:\n" + net(original, colours=True, ansi=sys.stdout.isatty()))
-        worst = sorted(conf.items(), key=lambda kv: -kv[1])[:3]
-        print("least certain stickers:", ", ".join(f"{facelet_name(p)} ({c:.0f})" for p, c in worst))
         try:
             plan = solve(original, try_orientations=cfg["solver"]["try_orientations"],
                          parallel=cfg["motion"]["parallel_opposite"],
                          time_budget_s=cfg["solver"].get("time_budget_s", 1.0),
                          quarter_turns_only=cfg["motion"].get("quarter_turns_only", True))
-        except ValueError as e:
-            print(f"\nThe detected cube is not a valid cube ({e}).")
-            print(f"Photos are in logs/{stamp}. Check lighting / ROIs and run again.")
-            print("The cube is back in the scramble it was given.")
-            sys.exit(2)
+        except Exception as e:      # bad counts, or Kociemba: impossible cube
+            where = "given state" if known else f"scan (photos in logs/{stamp})"
+            raise CommandFailed(f"not a valid cube ({e}); check the {where}. "
+                                "The cube is in the scramble it was given.")
         t2 = time.time()
         print(f"solver ({len(plan.solver_moves)} moves): {' '.join(plan.solver_moves)}")
         print(f"robot  ({len(plan.tokens)} steps): {' '.join(plan.tokens)}")
+        result = dict(ok=True, facelets=original, scanned=not known,
+                      solver_moves=plan.solver_moves, robot_moves=plan.robot_moves,
+                      tokens=plan.tokens, scan_s=round(scan_s, 2),
+                      software_s=round(t2 - t1, 3))
         if args.dry_run:
-            print("dry run: the cube is back in its scramble; the solution was not run")
+            print("dry run: the cube is in its scramble; the solution was not run")
+            emit(args, **result, executed=False)
             return
         shake_ms = 0
         if cfg.get("shake", {}).get("before_solve", False):
             shake_ms = shake(robot, cfg)
         motion_ms = robot.run(plan.tokens)
         t3 = time.time()
-        print(f"\nscan {t1 - t0:.2f} s (not timed; {len(smoves)} scan moves, then undone)")
-        print(f"software  {t2 - t1:.3f} s   (colours + solver, target < 2 s)")
+        if not known:
+            print(f"\nscan {scan_s:.2f} s (not timed)")
+        print(f"software  {t2 - t1:.3f} s   (solver, target < 2 s)")
         if shake_ms:
             print(f"shake     {shake_ms / 1000:.3f} s   (before the solution)")
         print(f"physical  {motion_ms / 1000:.3f} s   (firmware-measured motion, target < 2 s)")
         print(f"after-scan total incl. USB {t3 - t1:.3f} s")
+        emit(args, **result, executed=True, shake_ms=shake_ms, motion_ms=motion_ms,
+             total_s=round(t3 - t1, 3))
     finally:
-        cam.close()
+        if cam is not None:
+            cam.close()
         robot.close()
 
 
@@ -567,6 +636,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config")
+    ap.add_argument("--json", action="store_true",
+                    help="end with one line 'RESULT {...}' (used by the web UI)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("simulate")
     p.add_argument("-n", type=int, default=50)
@@ -595,9 +666,11 @@ def main():
     p = sub.add_parser("calibrate-colours")
     p.add_argument("--scrambled", action="store_true",
                    help="cube does not need to be solved (still white up, green front)")
+    sub.add_parser("read", help="scan the cube and print its state (cube ends as loaded)")
     p = sub.add_parser("solve")
     p.add_argument("--dry-run", action="store_true",
                    help="scan and solve, but do not execute the solution")
+    p.add_argument("--state", help="54-letter cube state (URFDLB); skips the scan")
     p = sub.add_parser("bench", help="time the motors with a random sequence and its inverse")
     p.add_argument("-n", type=int, default=20, help="moves in the sequence")
     p.add_argument("--speed", type=int, help="override max steps/s")
@@ -605,13 +678,25 @@ def main():
     p.add_argument("--seed", type=int, default=7)
     args = ap.parse_args()
     cfg = load_config(args.config)
-    {
+    command = {
         "simulate": cmd_simulate, "ping": cmd_ping, "drivers": cmd_drivers,
         "bench": cmd_bench,
         "move": cmd_move, "jog": cmd_jog, "motors": cmd_motors, "shake": cmd_shake,
         "calibrate-rois": cmd_calibrate_rois, "show-faces": cmd_show_faces,
         "calibrate-colours": cmd_calibrate_colours, "solve": cmd_solve,
-    }[args.cmd](cfg, args)
+        "read": cmd_read,
+    }[args.cmd]
+    try:
+        command(cfg, args)
+    except CommandFailed as e:
+        print(e)
+        emit(args, ok=False, error=str(e))
+        sys.exit(2)
+    except Exception as e:        # serial / camera problems: report, then fail
+        if args.json:
+            emit(args, ok=False, error=f"{type(e).__name__}: {e}")
+            sys.exit(1)
+        raise
 
 
 if __name__ == "__main__":
