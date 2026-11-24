@@ -14,7 +14,7 @@ with a check, so you know it worked before moving on.
 | 7. Calibration | Pi (desktop / VNC) | 20 min |
 | 8. First solve | Pi | 5 min |
 | 9. Speed tuning, overshoot and shake | Pi | 20 min |
-| 10. Dashboard | Laptop (+ Pi) | 10 min |
+| 10. Robot dashboard | Pi, opened from any browser | 10 min |
 
 Hardware assumed: Raspberry Pi 5, Camera Module 3 Wide at the back-bottom-right
 corner of the cube (it sees the D, B and R faces), MKS Gen L v1.0, five BTT
@@ -38,10 +38,11 @@ Everything is in this repository:
 
 ```
 pi/              Pi program (main.py) - scan, solve, drive the robot
+pi/web_app.py    robot dashboard hosted on the Pi (part 10), page in pi/web/
 firmware/        MKS Gen L sketches (cube_firmware + test sketches)
 docs/            wiring, serial protocol, this guide
-laptop_server/   dashboard (part 10)
-raspberry_pi/    Pi solver API for the dashboard (part 10)
+laptop_server/   older laptop dashboard (optional, end of part 10)
+raspberry_pi/    Pi solver API for the older laptop dashboard
 server/          older laptop-only solver API (not needed)
 ```
 
@@ -180,7 +181,7 @@ python -m pytest -q
 python main.py simulate -n 20
 ```
 
-Expect `61 passed` (it takes about a minute: some tests search scan plans) and
+Expect `72 passed` (it takes about a minute: some tests search scan plans) and
 `20/20 solved in simulation`. The first solve builds Kociemba's tables (a few
 seconds to a minute); later solves are fast.
 
@@ -433,6 +434,17 @@ stays at full speed.
 If the colours do not form a real cube, it stops after the scan (the cube is
 already back in its scramble): check the photos and the lighting.
 
+### Read and solve separately
+
+```bash
+python main.py read                     # scan only: prints the cube and its 54-letter state
+python main.py solve --state <54 letters>   # solve that state without scanning again
+```
+
+`read` ends with the cube back in its scramble, like every scan. Use
+`solve --state` only if the cube has not been turned since it was read. The
+dashboard (part 10) uses these two commands.
+
 ---
 
 ## 9. Speed tuning, overshoot and shake
@@ -491,22 +503,83 @@ fix a face that is far off (use `jog`).
 
 ---
 
-## 10. Dashboard
+## 10. Robot dashboard (hosted on the Pi)
 
-A web page with a 3D cube, scrambles and solutions. It runs on the laptop and
-asks the Pi to solve (`raspberry_pi/solver_app.py`, port 8011).
+A web page served by the Pi that drives the robot: scramble the real cube, read
+it with the camera and solve it, with a 3D cube that follows along. Open it
+from any browser on the same network (laptop or phone). Every button runs
+`main.py`, so it uses the same `config.toml`, speed, overshoot, scan plan and
+solver as the command line. More detail: `docs/web_ui.md`.
 
-**On the Pi** (needs the bundled solver in `raspberry_pi/vendor/pure_python`):
+**Start it** (on the Pi):
 
 ```bash
-cd ~/rubiks-solver/raspberry_pi
-bash setup.sh
-./run_solver.sh
+cd ~/rubiks-solver/pi
+./run_ui.sh
 ```
 
-**On the laptop** (PowerShell, in the `rubiks-solver` folder):
+It uses the `.venv` from part 4. Open `http://<pi-ip>:8080` on the laptop
+(for example `http://192.168.137.204:8080`; find the address with
+`hostname -I` on the Pi). The top right says **Robot ready**.
+
+**The three buttons:**
+
+| Button | Runs | What you see |
+| --- | --- | --- |
+| 1 Scramble | random F/R/B/L/D moves, then `main.py --json move "<moves>"` | the moves on screen; the robot turns them, then the 3D cube does |
+| 2 Read cube | `main.py --json read` | the scan (moves undone afterwards); the state read on the 3D cube, the 54 letters and the least certain stickers |
+| 3 Solve cube | `main.py --json solve --state <last read>` | the solver's moves, the robot steps, and scan / software / motion times; the 3D cube turns to solved |
+
+- **Solve uses the last Read** if the cube has not been scrambled since. After a
+  Scramble, Solve scans the cube first (the times show the scan).
+- **Load the cube white on top, green at the front**, as for every run.
+- **The top (white) face is fixed:** scrambles never use U, and the 3D cube can
+  only be turned by these buttons (drag it to look around).
+- **One command at a time:** while one runs, the buttons are disabled and a
+  second browser gets *the robot is busy*. The output of each `main.py` run is
+  shown under **main.py output**, including any error.
+- Each button opens the USB link fresh, which restarts the MKS (about 2 s), and
+  Read starts the camera fresh. This is outside the timed part of a solve.
+- **Do not run `main.py` robot commands by hand while a button is running**:
+  both need the USB link and the camera.
+
+**Start it automatically when the Pi boots** (edit `User` and the paths in
+`pi/rubik-ui.service` first if your username or folder differ):
+
+```bash
+cd ~/rubiks-solver/pi
+sudo cp rubik-ui.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now rubik-ui
+journalctl -u rubik-ui -f        # its output; Ctrl+C to stop watching
+sudo systemctl stop rubik-ui     # stop it (for example to use main.py by hand)
+```
+
+**Try the page without the robot** (any computer, in `pi/`):
+
+```bash
+python web_app.py --fake-robot
+```
+
+Open `http://localhost:8080`. A pretend robot (a cube in memory, starting
+solved) answers instead of `main.py`.
+
+**Check:** with the cube loaded and the light on, press **Read cube**: the 3D
+cube must match the real cube. Then **Scramble** and **Solve cube**.
+
+### Older laptop dashboard (optional)
+
+`laptop_server/` is the earlier dashboard: it runs on the laptop and only shows
+a 3D cube and solutions (it cannot turn the motors). It asks
+`raspberry_pi/solver_app.py` (port 8011) on the Pi to solve, which needs the
+bundled solver in `raspberry_pi/vendor/pure_python`.
+
+```bash
+cd ~/rubiks-solver/raspberry_pi && ./run_solver.sh        # on the Pi
+```
 
 ```powershell
+# on the laptop, in the rubiks-solver folder
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r laptop_server\requirements.txt
 $env:PI_SERVER_URL = "http://192.168.137.204:8011"
@@ -514,32 +587,14 @@ Set-Location .\laptop_server
 ..\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8010
 ```
 
-Open http://localhost:8010. The top right shows **Connected** when the Pi
-answers.
-
-What it does:
-
-- **The top (white) face cannot be turned**, as on the robot: clicking it only
-  shows a note, and there are no U buttons. Random and custom scrambles use only
-  F, R, B, L and D (a custom scramble with U is refused).
-- **Move order** (under the move buttons) lists every move made on the 3D cube
-  in order: scrambles, move buttons, clicks and applied solutions. **Copy**
-  copies it.
-- **Display state** loads a 54-letter state (URFDLB order); **Upload state** and
-  **Read Pi scan** store and load a state on the Pi.
-- **Find solutions** returns routes that use only F, R, B, L and D (U turns
-  rewritten), ranked by estimated time or turn count; **Apply solution** plays
-  one on the 3D cube.
-
-Without the Pi, the page still works: Upload and Read keep the state on the
-laptop, and the top right says *Raspberry Pi unavailable*. Solving then needs
-the bundled solver folder on the laptop (`raspberry_pi/vendor/pure_python`);
-without it, Find solutions says *Solver offline*.
-
-The dashboard's routes rewrite U turns but do not try the 24 orientations, so
-they can be longer than what `main.py solve` runs. Use `main.py solve` for
-timed runs. `raspberry_pi/robot_executor.py` can send a dashboard solution to
-the MKS (`--execute --port /dev/ttyUSB0`; dry run by default).
+Open http://localhost:8010. As on the robot, the top face cannot be turned and
+its solutions use only F, R, B, L and D, but it does not try the 24
+orientations, so routes can be longer than what `main.py solve` runs. It also
+has the **Move order** list (with **Copy**), Display / Upload state and Read Pi
+scan. Without the Pi it keeps uploaded states on the laptop, and Find solutions
+needs the bundled solver folder there too (otherwise it says *Solver offline*).
+`raspberry_pi/robot_executor.py` can send one of its solutions to the MKS
+(`--execute --port /dev/ttyUSB0`; dry run by default).
 
 ---
 
@@ -564,7 +619,10 @@ the MKS (`--execute --port /dev/ttyUSB0`; dry run by default).
 | Red and orange mixed up | Glare or changing daylight | Enclose the robot, diffuse the light, redo `calibrate-colours` |
 | `pip install kociemba` fails | Missing build tools | `sudo apt install python3-dev libffi-dev build-essential` |
 | picamera2 import error inside the venv | numpy installed with pip | `pip uninstall numpy`; venv made with `--system-site-packages` |
-| Dashboard says *Raspberry Pi unavailable* | Pi solver not running or wrong address | `./run_solver.sh` on the Pi; set `PI_SERVER_URL` to the Pi's address |
+| Robot dashboard page does not open | `run_ui.sh` not running, or wrong address | `./run_ui.sh` (or `sudo systemctl status rubik-ui`); use the Pi's IP with `:8080` |
+| Dashboard says *the robot is busy* | Another button (or browser) is still running a command | Wait for it to finish |
+| Dashboard shows `SerialException` / `no READY` | MKS not plugged in, or `main.py` run by hand at the same time | Check the USB cable and `python main.py ping`; do not use `main.py` while a button runs |
+| Older laptop dashboard says *Raspberry Pi unavailable* | Pi solver not running or wrong address | `./run_solver.sh` on the Pi; set `PI_SERVER_URL` to the Pi's address |
 
 ## Command reference (on the Pi, in `~/rubiks-solver/pi`)
 
@@ -581,5 +639,10 @@ the MKS (`--execute --port /dev/ttyUSB0`; dry run by default).
 | `python main.py calibrate-colours [--scrambled]` | Record face colours, one turn per key press |
 | `python main.py solve --dry-run` | Scan + solve, print only (cube turned back) |
 | `python main.py solve` | Scan, turn back, solve and execute |
+| `python main.py read` | Scan only: print the cube and its 54-letter state (cube turned back) |
+| `python main.py solve --state <54 letters>` | Solve and execute a known state, no scan |
+| `python main.py --json <command>` | Also end with one `RESULT {...}` line (used by the dashboard) |
+| `./run_ui.sh` | Start the robot dashboard on port 8080 (part 10) |
+| `python web_app.py --fake-robot` | The dashboard with a pretend robot, no hardware |
 | `python main.py bench [--speed --accel]` | Time the motors for speed tuning |
 | `python -m pytest -q` | Run the unit tests |
