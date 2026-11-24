@@ -77,17 +77,32 @@ def load_rois(path: str | Path) -> dict:
 
 
 def sample_lab(img_bgr: np.ndarray, rois: dict) -> dict[str, np.ndarray]:
-    """Median Lab colour around each ROI point -> {facelet name: Lab}."""
+    """Median Lab colour around each ROI point -> {facelet name: Lab}.
+
+    If rois has "image_size" [w, h] (the photo the points were picked on) and
+    the camera image is a different size, the points and radius are scaled to
+    it (same field of view assumed, e.g. 1280x720 points on a 1536x864 image)."""
     import cv2
     lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
-    r = int(rois.get("radius", 6))
     h, w = lab.shape[:2]
+    sx = sy = 1.0
+    if rois.get("image_size"):
+        sx, sy = w / rois["image_size"][0], h / rois["image_size"][1]
+    r = max(1, int(round(rois.get("radius", 6) * (sx + sy) / 2)))
     out = {}
     for name, (x, y) in rois["points"].items():
-        x, y = int(round(x)), int(round(y))
-        patch = lab[max(0, y - r):min(h, y + r + 1), max(0, x - r):min(w, x + r + 1)]
-        out[name] = np.median(patch.reshape(-1, 3), axis=0)
+        x, y = int(round(x * sx)), int(round(y * sy))
+        win = (slice(max(0, y - r), min(h, y + r + 1)), slice(max(0, x - r), min(w, x + r + 1)))
+        patch = lab[win].reshape(-1, 3)
+        # ignore glare: pixels where a colour channel is clipped (blown out)
+        ok = np.asarray(img_bgr[win]).reshape(-1, 3).max(axis=1) < CLIPPED
+        if ok.sum() >= max(4, patch.shape[0] // 5):
+            patch = patch[ok]
+        out[name] = np.median(patch, axis=0)
     return out
+
+
+CLIPPED = 250   # 8-bit channel value treated as blown out by a reflection
 
 
 # ------------------------------------------------------ colour classification

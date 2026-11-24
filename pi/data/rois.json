@@ -1,0 +1,37 @@
+{
+  "source": "TA6_marked_image_coordinate_guide.pdf (P01-P21), matched to facelets by projecting the cube from the back-bottom-right camera",
+  "radius": 6,
+  "image_size": [1280, 719],
+  "points": {
+    "R3": [600, 170],
+    "R6": [604, 235],
+    "R7": [442, 429],
+    "R8": [506, 400],
+    "R9": [606, 346],
+    "B1": [656, 165],
+    "B4": [662, 238],
+    "B7": [663, 345],
+    "B8": [746, 394],
+    "B9": [796, 435],
+    "D3": [476, 503],
+    "D6": [547, 469],
+    "D7": [766, 503],
+    "D8": [709, 471],
+    "D9": [633, 409]
+  },
+  "unreadable": {
+    "_note": "Glare stickers: located but not used. Move one into points to read it again.",
+    "R2": [530, 235],
+    "R4": [456, 348],
+    "B2": [724, 235],
+    "B6": [796, 342],
+    "D2": [557, 532],
+    "D4": [691, 531]
+  },
+  "guide_ids": {
+    "P01": "R2", "P02": "R3", "P03": "B1", "P04": "R6", "P05": "B4", "P06": "B2",
+    "P07": "R4", "P08": "R9", "P09": "B7", "P10": "B6", "P11": "R7", "P12": "R8",
+    "P13": "B8", "P14": "B9", "P15": "D9", "P16": "D6", "P17": "D8", "P18": "D3",
+    "P19": "D2", "P20": "D7", "P21": "D4"
+  }
+}

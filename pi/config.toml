@@ -50,9 +50,11 @@ candidate_faces = "DBR"
 # stickers unreadable on each face this needs at least 4 photos (an edge
 # sticker always stays an edge, and each photo then shows only 6 edges).
 # Facelets used by `simulate`. For the real robot the list comes from data/rois.json.
-visible = ["D1","D2","D3","D4","D6","D7","D8","D9",
-           "B1","B2","B3","B4","B6","B7","B8","B9",
-           "R1","R2","R3","R4","R6","R7","R8","R9"]
+# These are the 15 readable stickers of this robot: the far corners R1, B3, D1
+# are behind the motor rods, and R2, R4, B2, B6, D2, D4 show glare.
+visible = ["R3","R6","R7","R8","R9",
+           "B1","B4","B7","B8","B9",
+           "D3","D6","D7","D8","D9"]
 
 [solver]
 try_orientations = true    # try all 24 cube orientations, keep the fastest plan

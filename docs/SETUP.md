@@ -179,7 +179,7 @@ python -m pytest -q
 python main.py simulate -n 20
 ```
 
-Expect `52 passed` (it takes about a minute: some tests search scan plans) and
+Expect `56 passed` (it takes about a minute: some tests search scan plans) and
 `20/20 solved in simulation`. The first solve builds Kociemba's tables (a few
 seconds to a minute); later solves are fast.
 
@@ -235,9 +235,9 @@ Colour reading depends on stable light more than anything else.
 The program locks exposure, white balance and focus after a 2-second warm-up,
 so the light must be on before you start it.
 
-Stickers that still show glare (on this robot: two opposite edge stickers on
-each of D, B and R) do not need to be fixed with lighting: you skip them in
-part 7a and the scan reads them from another position.
+Stickers that still show glare (on this robot: the two far edge stickers on
+each of D, B and R) do not need to be fixed with lighting: they are left out of
+the sticker positions (part 7a) and the scan reads them from another position.
 
 ---
 
@@ -249,7 +249,24 @@ read, so this is how the program knows which colour belongs to which face.
 
 ### 7a. Sticker positions
 
-Run this from the Pi **desktop** (VNC), not plain SSH, because it opens a window:
+**Already done for this robot.** `pi/data/rois.json` holds the pixel position of
+every sticker the camera reads, taken from the TA6 marked-image coordinate guide
+(P01–P21, matched to sticker names by the camera geometry). The camera sees 21
+non-centre stickers; 15 are read:
+
+| Face | Read | Not read |
+| --- | --- | --- |
+| R (red) | R3 R6 R7 R8 R9 | R2 R4 (far edges, glare), R1 (behind the rod) |
+| B (blue) | B1 B4 B7 B8 B9 | B2 B6 (far edges, glare), B3 (behind the rod) |
+| D (yellow) | D3 D6 D7 D8 D9 | D2 D4 (far edges, glare), D1 (behind the rod) |
+
+The glare stickers' positions are kept under `"unreadable"` in the same file:
+move one into `"points"` to read it again. Points are stored for the guide's
+1280×719 photo and scaled automatically to the camera's resolution. When
+sampling, blown-out pixels (reflections) are ignored.
+
+Redo the positions only after moving the camera. Run this from the Pi
+**desktop** (VNC), not plain SSH, because it opens a window:
 
 ```bash
 cd ~/rubiks-solver/pi && source .venv/bin/activate
@@ -278,18 +295,18 @@ the scramble. The planner uses the fewest photos possible:
 | Readable stickers | Photos | Turns between photos (total) |
 | --- | --- | --- |
 | all 24 on D, B, R | 2 | 10 |
-| two opposite edges skipped on each face (18 readable) | 4 | 13–14 |
+| **this robot:** 15 (far edges and far corners not read) | 4 | 12 |
 
-Four is the minimum in the second case: a turn never moves an edge sticker to a
-corner position, and each photo then shows only 6 of the 24 edge stickers.
+Four is the minimum here: a turn never moves an edge sticker to a corner
+position, and each photo shows only 6 of the 24 edge stickers.
 
-The first command that scans searches for the plan (about 15 s) and saves it to
-`data/scan_plans.json`; later runs load it instantly. If you redo `calibrate-rois`
-with different stickers, a new plan is searched automatically. Every scanning
-command prints the plan it uses:
+The plan is saved in `data/scan_plans.json` (already there for this robot), so
+it loads instantly. If you redo `calibrate-rois` with different stickers, a new
+plan is searched automatically (up to about 15 s, once). Every scanning command
+prints the plan it uses:
 
 ```
-scan plan: 4 photos, 13 moves: (as loaded) | L B F' D | B F' R D L | F' R D L
+scan plan: 4 photos, 12 moves: (as loaded) | R B' F' R | R F' D B' | L' D B R'
 ```
 
 ### 7b. Colours
@@ -354,7 +371,7 @@ What happens:
 The output ends with:
 
 ```
-scan 9.80 s (not timed; 13 scan moves, then undone)
+scan 9.80 s (not timed; 12 scan moves, then undone)
 software  0.420 s   (colours + solver, target < 2 s)
 physical  2.300 s   (firmware-measured motion, target < 2 s)
 after-scan total incl. USB 2.760 s
