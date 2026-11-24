@@ -18,6 +18,7 @@ class Robot:
         self.verbose = verbose
         # True: every 180-degree turn is sent as two 90-degree turns.
         self.quarter_turns_only = quarter_turns_only
+        self.settle_us = 2000      # pause the board adds after each move
         self.ser = serial.Serial(port, baud, timeout=0.2)
         # Opening the port resets the ATmega2560; wait for its banner.
         deadline = time.time() + boot_timeout
@@ -67,7 +68,8 @@ class Robot:
         self.command(f"SPEED {max_sps} {accel}")
 
     def settle(self, us: int) -> None:
-        self.command(f"SETTLE {us}")
+        self.command(f"SETTLE {int(us)}")
+        self.settle_us = int(us)
 
     def overshoot(self, deg: float) -> None:
         """Turn every MOV this many degrees past the target, then back (0 = off).
@@ -116,7 +118,7 @@ class Robot:
         for i in range(0, len(tokens), MAX_TOKENS_PER_LINE):
             chunk = tokens[i:i + MAX_TOKENS_PER_LINE]
             self.command("MOV " + " ".join(chunk),
-                         timeout=2.0 + per_token_s * len(chunk))
+                         timeout=2.0 + (per_token_s + self.settle_us / 1e6) * len(chunk))
             parts = self.last_ok.split()
             if len(parts) >= 3:
                 total_ms += int(parts[2])

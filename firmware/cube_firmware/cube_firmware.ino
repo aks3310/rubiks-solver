@@ -15,7 +15,7 @@
 #include <TMCStepper.h>
 #include "config.h"
 
-#define FW_VERSION "1.3"
+#define FW_VERSION "1.4"
 
 // ----- drivers ---------------------------------------------------------------
 TMC2209Stepper drvF(F_RX, F_TX, R_SENSE, 0);
@@ -45,11 +45,18 @@ const uint8_t N_AXES = sizeof(axes) / sizeof(axes[0]);
 
 float maxSps = DEFAULT_MAX_SPS;
 float accel = DEFAULT_ACCEL;
-uint16_t settleUs = DEFAULT_SETTLE_US;
+uint32_t settleUs = DEFAULT_SETTLE_US;
 uint16_t runCurrent = RUN_CURRENT_MA;
 // microsteps past the target before coming back (OVERSHOOT command), 0 = off
 long overshootSteps = lround(DEFAULT_OVERSHOOT_DEG * QUARTER_STEPS / 90.0);
 bool enabled = false;
+
+// Pause for any length. delayMicroseconds() is only accurate up to 16383 us on
+// the ATmega2560 (longer values overflow and give a much shorter pause).
+void waitUs(uint32_t us) {
+  if (us >= 1000) delay(us / 1000);
+  if (us % 1000) delayMicroseconds(us % 1000);
+}
 
 // ramp[s] = microseconds to wait after step s of a move (s counted from the
 // nearer end). Entries past rampLen use the cruise delay.
@@ -165,7 +172,7 @@ void runTurn(uint8_t n, const int8_t idx[], const long steps[]) {
     back[k] = -o;
   }
   runMotion(n, idx, out, true);
-  if (OVERSHOOT_PAUSE_US) delayMicroseconds(OVERSHOOT_PAUSE_US);
+  if (OVERSHOOT_PAUSE_US) waitUs(OVERSHOOT_PAUSE_US);
   runMotion(n, idx, back, true);
 }
 
@@ -227,7 +234,7 @@ void cmdMove(char *args) {
   unsigned long t0 = micros();
   for (uint8_t i = 0; i < nTok; i++) {
     runTurn(plan[i].n, plan[i].idx, plan[i].st);
-    if (settleUs) delayMicroseconds(settleUs);
+    if (settleUs) waitUs(settleUs);
   }
   unsigned long ms = (micros() - t0) / 1000UL;
   Serial.print(F("OK ")); Serial.print(nTok); Serial.print(' '); Serial.println(ms);
@@ -286,7 +293,7 @@ void cmdShake(char *args) {
     runMotion(n, idx, swingBack, true);
   }
   runMotion(n, idx, home, true);
-  if (settleUs) delayMicroseconds(settleUs);
+  if (settleUs) waitUs(settleUs);
   unsigned long ms = (micros() - t0) / 1000UL;
   Serial.print(F("OK ")); Serial.println(ms);
 }
@@ -338,7 +345,7 @@ void handleLine(char *s) {
   }
   else if (!strcmp(s, "SETTLE")) {
     long us = atol(args);
-    if (us < 0 || us > 50000) { Serial.println(F("ERR RANGE 0-50000 us")); return; }
+    if (us < 0 || us > 2000000L) { Serial.println(F("ERR RANGE 0-2000000 us")); return; }
     settleUs = us;
     Serial.println(F("OK"));
   }

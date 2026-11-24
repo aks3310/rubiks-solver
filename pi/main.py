@@ -427,7 +427,8 @@ def cmd_solve(cfg, args):
         t0 = time.time()
         # photos, then the scan moves are undone: the cube is back in the
         # scramble it was given before the timed part starts
-        samples = run_scan(cfg, robot, cam, rois, steps, HERE / "logs" / stamp)
+        samples = run_scan(cfg, robot, cam, rois, steps, HERE / "logs" / stamp,
+                           turn_delay_s=cfg["scan"].get("turn_delay_s", 0.0))
         t1 = time.time()
         original, conf = classify(collect_observations(samples, steps), refs)
         print("detected scramble:\n" + net(original, colours=True, ansi=sys.stdout.isatty()))

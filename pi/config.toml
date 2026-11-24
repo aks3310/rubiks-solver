@@ -17,7 +17,7 @@ settle_s = 0.25            # wait after a move before the photo
 # `python main.py bench --speed N --accel A` until turns skip, then back off ~15 %.
 max_steps_per_s = 6000     # 6000 sps = 225 rpm
 accel_steps_per_s2 = 150000
-settle_us = 2000           # pause after each move, microseconds
+settle_us = 2000           # pause the board adds after EVERY move (scan and solution), us; 0-2000000
 parallel_opposite = true   # turn R and L (or F and B) at the same time
 quarter_turns_only = true  # every 180-degree turn is done as two 90-degree turns
 # Overshoot: each turn goes overshoot_deg past its target in the direction of
@@ -37,6 +37,8 @@ before_scan = false        # shake once before the first photo (scan is not time
 before_solve = false       # shake once after the scan, before the solution (adds to the timed part)
 
 [scan]
+turn_delay_s = 0.0         # pause after each scan turn and each undo turn in `solve` (s); 0 = none.
+                           # Not timed and does not slow the solution. Calibration uses [calibration].
 max_seq_len = 3
 min_views = 1              # >1 = read each sticker that many times (greedy planner, more photos)
 min_photos = true          # try the 2-photo plan first (fewest photos possible)

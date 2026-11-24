@@ -62,10 +62,11 @@ copy it to the Pi in part 4.
    Port: the MKS's COM port. Click Upload.
 
 **Check:** open the Serial Monitor (115200 baud, line ending **Newline**). After
-a reset it prints `READY rubik-fw 1.3`. Type `PING` → `PONG` and `OK`.
+a reset it prints `READY rubik-fw 1.4`. Type `PING` → `PONG` and `OK`.
 
-Firmware **1.3** is needed by the Pi program: it adds the `OVERSHOOT` and
-`SHAKE` commands (part 9). With older firmware `main.py` stops and asks you to
+Firmware **1.4** is needed by the Pi program: 1.3 added the `OVERSHOOT` and
+`SHAKE` commands (part 9), and 1.4 makes pauses longer than 16 ms (`SETTLE`)
+work correctly. With older firmware `main.py` stops and asks you to
 upload `cube_firmware` again.
 
 ### Check every motor's direction
@@ -201,7 +202,7 @@ another name, change `port` in `pi/config.toml`.
 **Check (cube out or adapters loose):**
 
 ```bash
-python main.py ping          # READY rubik-fw 1.3 | ping ok
+python main.py ping          # READY rubik-fw 1.4 | ping ok
 python main.py move "F F'"   # front face out and back
 python main.py jog F 10      # nudge the front motor 10 microsteps
 python main.py shake         # all faces wiggle and stop where they started
@@ -378,6 +379,18 @@ after-scan total incl. USB 2.760 s
 ```
 
 (example numbers). Photos of every run are saved in `pi/logs/<date-time>/`.
+
+**Timing settings** (`pi/config.toml`):
+
+| Setting | Pause | Applies to |
+| --- | --- | --- |
+| `[scan] turn_delay_s` | after each scan turn and each undo turn (Pi side) | scan only, not timed; 0 = none |
+| `[camera] settle_s` | before each photo | scan only |
+| `[motion] settle_us` | after **every** move, done by the board (0–2 000 000 µs) | scan **and** the timed solution |
+| `[calibration] turn_delay_s` | after each turn, plus a key press | `calibrate-colours` only |
+
+To watch the scan turn by turn, set `[scan] turn_delay_s = 0.5`; the solution
+stays at full speed.
 If the colours do not form a real cube, it stops after the scan (the cube is
 already back in its scramble): check the photos and the lighting.
 
