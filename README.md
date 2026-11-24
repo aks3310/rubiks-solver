@@ -22,6 +22,7 @@ in `raspberry_pi/` vs the compiled pip package in `pi/`).
 ## Part 1: Robot software (rubiks-solver)
 
 **Step-by-step setup: [docs/SETUP.md](docs/SETUP.md).**
+**Robot dashboard on the Pi (scramble, read, solve from a browser): [docs/web_ui.md](docs/web_ui.md).**
 
 ### Rubik's cube solver robot
 
