@@ -1,5 +1,15 @@
 # Rubik's cube robot - host configuration (Raspberry Pi 5)
 
+[cube]
+# How the cube is loaded into the robot: the colour facing up (the top face,
+# which has no motor) and the colour facing the front. The other four faces
+# follow from the standard colour scheme (white-yellow, green-blue,
+# red-orange opposite), e.g. top yellow + front green puts orange on the right.
+# Load it this way every time. Colour calibration remembers the orientation it
+# was made with, so changing this does not need a new calibrate-colours.
+top = "white"
+front = "green"
+
 [serial]
 port = "/dev/ttyUSB0"      # MKS Gen L v1.0 (CH340). Check with: ls /dev/ttyUSB*
 baud = 115200

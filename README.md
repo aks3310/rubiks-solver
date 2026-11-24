@@ -75,7 +75,7 @@ The first `kociemba` call builds its tables (a few seconds); later calls are fas
 
 #### 3. One-time calibration
 
-1. Load the cube **white on top, green at the front** and keep this for every run.
+1. Load the cube **white on top, green at the front** (or set `[cube] top` / `front` in `pi/config.toml` to the way you load it) and keep this for every run.
 2. `python main.py calibrate-rois` (needs the Pi desktop or VNC): click the
    centre of each sticker it asks for; press `s` for any sticker the camera
    cannot see. Then copy the printed `visible = [...]` list into `config.toml`.

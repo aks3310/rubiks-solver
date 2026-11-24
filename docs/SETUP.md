@@ -181,7 +181,7 @@ python -m pytest -q
 python main.py simulate -n 20
 ```
 
-Expect `72 passed` (it takes about a minute: some tests search scan plans) and
+Expect `82 passed` (it takes about a minute: some tests search scan plans) and
 `20/20 solved in simulation`. The first solve builds Kociemba's tables (a few
 seconds to a minute); later solves are fast.
 
@@ -248,6 +248,26 @@ the sticker positions (part 7a) and the scan reads them from another position.
 **Load the cube the same way every time:** white on top, green at the front.
 The camera then sees yellow (D), blue (B) and red (R). The centres are never
 read, so this is how the program knows which colour belongs to which face.
+
+To load it another way, say so in `pi/config.toml`:
+
+```toml
+[cube]
+top = "white"     # colour facing up (the face with no motor)
+front = "green"   # colour facing the front
+```
+
+The other four faces follow from the standard colour scheme (white–yellow,
+green–blue and red–orange are opposite); for example `top = "yellow"`,
+`front = "green"` puts orange on the right. The colour calibration remembers
+the orientation it was made with and is remapped automatically, so changing
+`[cube]` does not need a new `calibrate-colours`. The printed cube and the
+dashboard use these colours too.
+
+**Face turns cannot move the cube onto other motors.** Each motor holds a
+centre, and no sequence of face turns moves a centre, so a cube loaded with the
+wrong colours on the motors cannot be fixed by turning faces. Either take the
+cube out and load it correctly, or set `[cube]` to the way it is loaded.
 
 ### 7a. Sticker positions
 
@@ -532,7 +552,7 @@ It uses the `.venv` from part 4. Open `http://<pi-ip>:8080` on the laptop
 
 - **Solve uses the last Read** if the cube has not been scrambled since. After a
   Scramble, Solve scans the cube first (the times show the scan).
-- **Load the cube white on top, green at the front**, as for every run.
+- **Load the cube as set in `[cube]` in `config.toml`** (white on top, green at the front by default), as for every run. The page shows the colours it expects.
 - **The top (white) face is fixed:** scrambles never use U, and the 3D cube can
   only be turned by these buttons (drag it to look around).
 - **One command at a time:** while one runs, the buttons are disabled and a
