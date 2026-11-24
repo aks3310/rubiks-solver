@@ -7,7 +7,8 @@
     python main.py move "R L' F2"           # turn faces by hand
     python main.py jog F 10                 # nudge one motor (alignment)
     python main.py motors off
-    python main.py calibrate-rois           # click the sticker positions once
+    python main.py show-faces               # draw the face model on a live photo
+    python main.py calibrate-rois           # click sticker positions (if not using the face model)
     python main.py calibrate-colours        # scan a SOLVED cube once
     python main.py solve [--dry-run]        # scan, solve, execute
 
@@ -356,9 +357,22 @@ def cmd_calibrate_rois(cfg, args):
           + str(list(points)).replace("'", '"'))
 
 
-def _scan_setup(cfg):
+def load_sticker_positions(cfg) -> dict:
+    """Where to read each sticker in the camera image.
+
+    [scan] sticker_source = "face_model" (default): from data/face_model.json,
+    for the stickers listed in [scan] visible. "rois": the points clicked with
+    calibrate-rois (data/rois.json)."""
     from rubik.vision import load_rois
-    rois = load_rois(cfg_path(cfg, "rois"))
+    if cfg["scan"].get("sticker_source", "face_model") == "face_model":
+        from rubik.face_model import FaceModel
+        model = FaceModel.load(cfg_path(cfg, "faces"))
+        return model.rois(cfg["scan"]["visible"], cfg["scan"].get("patch_inset", 0.3))
+    return load_rois(cfg_path(cfg, "rois"))
+
+
+def _scan_setup(cfg):
+    rois = load_sticker_positions(cfg)
     steps = plan_scan(list(rois["points"]), cfg["scan"]["max_seq_len"],
                       min_views=cfg["scan"].get("min_views", 1),
                       min_photos=cfg["scan"].get("min_photos", True),
@@ -367,6 +381,41 @@ def _scan_setup(cfg):
     print(f"scan plan: {len(steps)} photos, {len(smoves)} moves: "
           + " | ".join(" ".join(s.moves) or "(as loaded)" for s in steps))
     return rois, steps
+
+
+def cmd_show_faces(cfg, args):
+    """Draw the face model (curved outlines, sticker grid, sampled patches) on a
+    camera photo, to check it still matches after moving anything."""
+    import cv2
+    from rubik.face_model import FaceModel
+    if args.image:
+        img = cv2.imread(args.image)
+    else:
+        cam = open_camera(cfg)
+        img = cam.capture()
+        cam.close()
+    h, w = img.shape[:2]
+    model = FaceModel.load(cfg_path(cfg, "faces"))
+    sx, sy = w / model.image_size[0], h / model.image_size[1]
+    colour = {"R": (60, 60, 255), "B": (255, 140, 60), "D": (0, 220, 255)}   # BGR
+    for face in "RBD":
+        for k, line in enumerate(model.grid_lines(face)):
+            pts = np.round(line * [sx, sy]).astype(np.int32)
+            cv2.polylines(img, [pts], False, colour[face], 3 if k == 0 else 1, cv2.LINE_AA)
+    rois = load_sticker_positions(cfg)
+    for name, quad in rois.get("patches", {}).items():
+        pts = np.round(np.array(quad) * [sx, sy]).astype(np.int32)
+        cv2.polylines(img, [pts], True, (255, 255, 255), 2, cv2.LINE_AA)
+        x, y = np.array(rois["points"][name]) * [sx, sy]
+        cv2.putText(img, name, (int(x) - 12, int(y) + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(img, name, (int(x) - 12, int(y) + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (255, 255, 255), 1, cv2.LINE_AA)
+    out = cfg_path(cfg, "faces").with_name("faces_check.jpg")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out), img)
+    print(f"saved {out}: the lines must sit on the grooves between cubies and every "
+          "white box inside one sticker. If not, the camera moved: refit the face model.")
 
 
 def cmd_calibrate_colours(cfg, args):
@@ -514,6 +563,8 @@ def main():
     p.add_argument("--faces", help="which faces, e.g. FB (default: config.toml)")
     p = sub.add_parser("motors")
     p.add_argument("state", choices=["on", "off"])
+    p = sub.add_parser("show-faces", help="draw the face model on a camera photo")
+    p.add_argument("--image", help="use a saved photo instead of the camera")
     p = sub.add_parser("calibrate-rois")
     p.add_argument("--image", help="use a saved photo instead of the camera")
     p = sub.add_parser("calibrate-colours")
@@ -533,7 +584,7 @@ def main():
         "simulate": cmd_simulate, "ping": cmd_ping, "drivers": cmd_drivers,
         "bench": cmd_bench,
         "move": cmd_move, "jog": cmd_jog, "motors": cmd_motors, "shake": cmd_shake,
-        "calibrate-rois": cmd_calibrate_rois,
+        "calibrate-rois": cmd_calibrate_rois, "show-faces": cmd_show_faces,
         "calibrate-colours": cmd_calibrate_colours, "solve": cmd_solve,
     }[args.cmd](cfg, args)
 

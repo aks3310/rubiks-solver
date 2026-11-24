@@ -51,8 +51,14 @@ candidate_faces = "DBR"
 # faces between photos until every sticker has been read once. With two edge
 # stickers unreadable on each face this needs at least 4 photos (an edge
 # sticker always stays an edge, and each photo then shows only 6 edges).
-# Facelets used by `simulate`. For the real robot the list comes from data/rois.json.
-# These are the 15 readable stickers of this robot: the far corners R1, B3, D1
+# Where stickers are read in the camera image:
+#   "face_model" - from data/face_model.json (fixed camera, nothing to click),
+#                  for the stickers listed in `visible`. Check it with
+#                  `python main.py show-faces`.
+#   "rois"       - the points clicked with `python main.py calibrate-rois`.
+sticker_source = "face_model"
+patch_inset = 0.3          # face model: sample the middle of each sticker (0.3 = middle 40 %)
+# Stickers that are read (also used by `simulate`). The far corners R1, B3, D1
 # are behind the motor rods, and R2, R4, B2, B6, D2, D4 show glare.
 visible = ["R3","R6","R7","R8","R9",
            "B1","B4","B7","B8","B9",
@@ -71,4 +77,5 @@ confirm_each_turn = true   # wait for a key press before every turn
 [files]
 rois = "data/rois.json"
 colours = "data/colours.json"
+faces = "data/face_model.json"         # fixed-camera face model (sticker_source = "face_model")
 scan_plans = "data/scan_plans.json"   # remembered scan plans; delete to search again

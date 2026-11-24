@@ -180,7 +180,7 @@ python -m pytest -q
 python main.py simulate -n 20
 ```
 
-Expect `56 passed` (it takes about a minute: some tests search scan plans) and
+Expect `61 passed` (it takes about a minute: some tests search scan plans) and
 `20/20 solved in simulation`. The first solve builds Kociemba's tables (a few
 seconds to a minute); later solves are fast.
 
@@ -250,10 +250,20 @@ read, so this is how the program knows which colour belongs to which face.
 
 ### 7a. Sticker positions
 
-**Already done for this robot.** `pi/data/rois.json` holds the pixel position of
-every sticker the camera reads, taken from the TA6 marked-image coordinate guide
-(P01–P21, matched to sticker names by the camera geometry). The camera sees 21
-non-centre stickers; 15 are read:
+**Already done for this robot: nothing to click.** The camera is fixed, so the
+position of every face is hard-coded in `pi/data/face_model.json` (the face
+model, `pi/rubik/face_model.py`):
+
+- the 7 face corners (T, V, BL, BR seen in the photo; R1, B3, D1 behind the
+  rods) and the lens bend, fitted so the grooves between cubies fall on each
+  face's 3×3 grid (about 3 px, see `docs/face_quads.jpg`);
+- each sticker is read from the **middle 40 %** of its cell (`patch_inset = 0.3`
+  in `[scan]`), away from grooves and bevels; blown-out pixels (reflections)
+  are ignored;
+- positions are stored for a 2000×1125 photo and scaled to the camera's
+  resolution.
+
+The stickers read are listed in `[scan] visible` (15 of the 21 the camera sees):
 
 | Face | Read | Not read |
 | --- | --- | --- |
@@ -261,12 +271,23 @@ non-centre stickers; 15 are read:
 | B (blue) | B1 B4 B7 B8 B9 | B2 B6 (far edges, glare), B3 (behind the rod) |
 | D (yellow) | D3 D6 D7 D8 D9 | D2 D4 (far edges, glare), D1 (behind the rod) |
 
-The glare stickers' positions are kept under `"unreadable"` in the same file:
-move one into `"points"` to read it again. Points are stored for the guide's
-1280×719 photo and scaled automatically to the camera's resolution. When
-sampling, blown-out pixels (reflections) are ignored.
+The other faces are read by turning them into view (below).
 
-Redo the positions only after moving the camera. Run this from the Pi
+**Check it on the robot** (cube loaded, light on):
+
+```bash
+python main.py show-faces            # or: --image photo.jpg
+```
+
+It saves `pi/data/faces_check.jpg` with the curved face outlines, the sticker
+grid and a white box where each sticker is sampled. The lines must sit on the
+grooves and every box inside one sticker. If the camera has moved, the face
+model has to be refitted (or switch to clicked points: below).
+
+**Clicked points instead** (`[scan] sticker_source = "rois"`): the older method,
+`pi/data/rois.json` (from the TA6 coordinate guide, or `calibrate-rois`).
+
+To click them again, run this from the Pi
 **desktop** (VNC), not plain SSH, because it opens a window:
 
 ```bash
@@ -537,7 +558,8 @@ the MKS (`--execute --port /dev/ttyUSB0`; dry run by default).
 | `python main.py jog F 10` | Nudge one motor (microsteps, no overshoot) |
 | `python main.py shake [--deg --cycles --faces]` | Wiggle the faces to settle the cube |
 | `python main.py motors on` / `off` | Hold or release all motors |
-| `python main.py calibrate-rois` | Click sticker positions, `s` to skip (desktop) |
+| `python main.py show-faces [--image]` | Draw the face model on a photo to check it |
+| `python main.py calibrate-rois` | Click sticker positions, `s` to skip (desktop; only with `sticker_source = "rois"`) |
 | `python main.py calibrate-colours [--scrambled]` | Record face colours, one turn per key press |
 | `python main.py solve --dry-run` | Scan + solve, print only (cube turned back) |
 | `python main.py solve` | Scan, turn back, solve and execute |

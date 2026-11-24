@@ -77,11 +77,13 @@ def load_rois(path: str | Path) -> dict:
 
 
 def sample_lab(img_bgr: np.ndarray, rois: dict) -> dict[str, np.ndarray]:
-    """Median Lab colour around each ROI point -> {facelet name: Lab}.
+    """Median Lab colour of each sticker -> {facelet name: Lab}.
 
-    If rois has "image_size" [w, h] (the photo the points were picked on) and
-    the camera image is a different size, the points and radius are scaled to
-    it (same field of view assumed, e.g. 1280x720 points on a 1536x864 image)."""
+    rois["patches"][name] (4 corners, from the face model) is the area sampled
+    when present; otherwise a square of `radius` around rois["points"][name].
+    If rois has "image_size" [w, h] (the photo the positions were taken on) and
+    the camera image is a different size, everything is scaled to it (same
+    field of view assumed, e.g. 2000x1125 positions on a 1536x864 image)."""
     import cv2
     lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
     h, w = lab.shape[:2]
@@ -89,17 +91,47 @@ def sample_lab(img_bgr: np.ndarray, rois: dict) -> dict[str, np.ndarray]:
     if rois.get("image_size"):
         sx, sy = w / rois["image_size"][0], h / rois["image_size"][1]
     r = max(1, int(round(rois.get("radius", 6) * (sx + sy) / 2)))
+    patches = rois.get("patches", {})
     out = {}
     for name, (x, y) in rois["points"].items():
-        x, y = int(round(x * sx)), int(round(y * sy))
-        win = (slice(max(0, y - r), min(h, y + r + 1)), slice(max(0, x - r), min(w, x + r + 1)))
-        patch = lab[win].reshape(-1, 3)
+        if name in patches:
+            quad = np.array(patches[name], float) * [sx, sy]
+            ys, xs = _inside_quad(quad, w, h)
+        else:
+            x, y = int(round(x * sx)), int(round(y * sy))
+            ys, xs = np.mgrid[max(0, y - r):min(h, y + r + 1), max(0, x - r):min(w, x + r + 1)]
+            ys, xs = ys.ravel(), xs.ravel()
+        if len(xs) == 0:
+            raise ValueError(f"sticker {name} is outside the {w}x{h} image")
+        patch = lab[ys, xs]
         # ignore glare: pixels where a colour channel is clipped (blown out)
-        ok = np.asarray(img_bgr[win]).reshape(-1, 3).max(axis=1) < CLIPPED
+        ok = np.asarray(img_bgr)[ys, xs].max(axis=1) < CLIPPED
         if ok.sum() >= max(4, patch.shape[0] // 5):
             patch = patch[ok]
         out[name] = np.median(patch, axis=0)
     return out
+
+
+def _inside_quad(quad: np.ndarray, w: int, h: int):
+    """Pixel rows/cols inside a convex 4-corner polygon (clipped to the image)."""
+    x0, y0 = np.floor(quad.min(0)).astype(int)
+    x1, y1 = np.ceil(quad.max(0)).astype(int)
+    x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, w - 1), min(y1, h - 1)
+    if x1 < x0 or y1 < y0:
+        return np.zeros(0, int), np.zeros(0, int)
+    ys, xs = np.mgrid[y0:y1 + 1, x0:x1 + 1]
+    ys, xs = ys.ravel(), xs.ravel()
+    sign = None
+    keep = np.ones(len(xs), bool)
+    for i in range(4):
+        ax, ay = quad[i]
+        bx, by = quad[(i + 1) % 4]
+        cross = (bx - ax) * (ys - ay) - (by - ay) * (xs - ax)
+        if sign is None:
+            sign = 1 if ((bx - ax) * (quad[(i + 2) % 4][1] - ay)
+                         - (by - ay) * (quad[(i + 2) % 4][0] - ax)) >= 0 else -1
+        keep &= cross * sign >= 0
+    return ys[keep], xs[keep]
 
 
 CLIPPED = 250   # 8-bit channel value treated as blown out by a reflection
