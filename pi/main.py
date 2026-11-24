@@ -81,7 +81,8 @@ def shake(robot, cfg, deg=None, cycles=None, faces=None) -> int:
 def open_camera(cfg):
     from rubik.vision import Camera
     c = cfg["camera"]
-    return Camera(c["width"], c["height"], c.get("lens_position"))
+    return Camera(c["width"], c["height"], c.get("lens_position"),
+                  full_fov=c.get("full_fov", False))
 
 
 # MKS socket of each face; must match the STEP pins in firmware/cube_firmware/config.h
@@ -365,10 +366,19 @@ def load_sticker_positions(cfg) -> dict:
     calibrate-rois (data/rois.json)."""
     from rubik.vision import load_rois
     if cfg["scan"].get("sticker_source", "face_model") == "face_model":
-        from rubik.face_model import FaceModel
-        model = FaceModel.load(cfg_path(cfg, "faces"))
-        return model.rois(cfg["scan"]["visible"], cfg["scan"].get("patch_inset", 0.3))
+        return load_face_model(cfg).rois(cfg["scan"]["visible"], cfg["scan"].get("patch_inset", 0.3))
     return load_rois(cfg_path(cfg, "rois"))
+
+
+def load_face_model(cfg, scale=None, offset=None):
+    """The face model with [scan] face_scale / face_offset applied (offset in
+    pixels of the camera image, [camera] width x height)."""
+    from rubik.face_model import FaceModel
+    sc = cfg["scan"]
+    cam = (cfg["camera"]["width"], cfg["camera"]["height"])
+    return FaceModel.load(cfg_path(cfg, "faces")).adjust(
+        sc.get("face_scale", 1.0) if scale is None else scale,
+        sc.get("face_offset", [0, 0]) if offset is None else offset, image_size=cam)
 
 
 def _scan_setup(cfg):
@@ -395,14 +405,21 @@ def cmd_show_faces(cfg, args):
         img = cam.capture()
         cam.close()
     h, w = img.shape[:2]
-    model = FaceModel.load(cfg_path(cfg, "faces"))
+    sc = cfg["scan"]
+    scale = sc.get("face_scale", 1.0) if args.scale is None else args.scale
+    off = list(sc.get("face_offset", [0, 0]))
+    if args.dx is not None:
+        off[0] = args.dx
+    if args.dy is not None:
+        off[1] = args.dy
+    model = load_face_model(cfg, scale, off)
     sx, sy = w / model.image_size[0], h / model.image_size[1]
     colour = {"R": (60, 60, 255), "B": (255, 140, 60), "D": (0, 220, 255)}   # BGR
     for face in "RBD":
         for k, line in enumerate(model.grid_lines(face)):
             pts = np.round(line * [sx, sy]).astype(np.int32)
             cv2.polylines(img, [pts], False, colour[face], 3 if k == 0 else 1, cv2.LINE_AA)
-    rois = load_sticker_positions(cfg)
+    rois = model.rois(cfg["scan"]["visible"], sc.get("patch_inset", 0.3))
     for name, quad in rois.get("patches", {}).items():
         pts = np.round(np.array(quad) * [sx, sy]).astype(np.int32)
         cv2.polylines(img, [pts], True, (255, 255, 255), 2, cv2.LINE_AA)
@@ -413,9 +430,14 @@ def cmd_show_faces(cfg, args):
                     (255, 255, 255), 1, cv2.LINE_AA)
     out = cfg_path(cfg, "faces").with_name("faces_check.jpg")
     out.parent.mkdir(parents=True, exist_ok=True)
+    cv2.putText(img, f"face_scale = {scale:g}   face_offset = [{off[0]:g}, {off[1]:g}]   ({w}x{h})",
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 4, cv2.LINE_AA)
+    cv2.putText(img, f"face_scale = {scale:g}   face_offset = [{off[0]:g}, {off[1]:g}]   ({w}x{h})",
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
     cv2.imwrite(str(out), img)
-    print(f"saved {out}: the lines must sit on the grooves between cubies and every "
-          "white box inside one sticker. If not, the camera moved: refit the face model.")
+    print(f"saved {out} with face_scale = {scale:g}, face_offset = [{off[0]:g}, {off[1]:g}]")
+    print("The lines must sit on the grooves between cubies and every white box inside one "
+          "sticker. Try other values with --scale/--dx/--dy, then put them in config.toml [scan].")
 
 
 def cmd_calibrate_colours(cfg, args):
@@ -565,6 +587,9 @@ def main():
     p.add_argument("state", choices=["on", "off"])
     p = sub.add_parser("show-faces", help="draw the face model on a camera photo")
     p.add_argument("--image", help="use a saved photo instead of the camera")
+    p.add_argument("--scale", type=float, help="try a face_scale (grow the grid about the centre)")
+    p.add_argument("--dx", type=float, help="try a face_offset x, camera pixels (+ = right)")
+    p.add_argument("--dy", type=float, help="try a face_offset y, camera pixels (+ = down)")
     p = sub.add_parser("calibrate-rois")
     p.add_argument("--image", help="use a saved photo instead of the camera")
     p = sub.add_parser("calibrate-colours")

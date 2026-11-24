@@ -26,12 +26,24 @@ from .cube import CENTRES, FACES, facelet_index
 
 class Camera:
     def __init__(self, width: int = 1536, height: int = 864,
-                 lens_position: float | None = None, warmup_s: float = 2.0):
+                 lens_position: float | None = None, warmup_s: float = 2.0,
+                 full_fov: bool = False):
+        """full_fov: force the full-sensor 2x2-binned mode (Camera Module 3:
+        2304x1296). Otherwise libcamera picks the mode from the output size,
+        and for 1536x864 that can be a cropped (zoomed-in) mode."""
         from picamera2 import Picamera2  # Pi only
         self.cam = Picamera2()
-        cfg = self.cam.create_still_configuration(
-            main={"size": (width, height), "format": "RGB888"})
+        kwargs = {"main": {"size": (width, height), "format": "RGB888"}}
+        if full_fov:
+            kwargs["sensor"] = {"output_size": (2304, 1296)}
+        try:
+            cfg = self.cam.create_still_configuration(**kwargs)
+        except TypeError:            # older picamera2 without sensor=
+            kwargs.pop("sensor", None)
+            kwargs["raw"] = {"size": (2304, 1296)}
+            cfg = self.cam.create_still_configuration(**kwargs)
         self.cam.configure(cfg)
+        self.sensor_mode = cfg.get("sensor") or cfg.get("raw")
         self.cam.start()
         time.sleep(warmup_s)
         self._lock(lens_position)

@@ -37,6 +37,18 @@ class FaceModel:
         self.image_size = tuple(data.get("image_size", (2000, 1125)))
         corners = {k: np.array(v, float) for k, v in data["corners_undistorted"].items()}
         self.H = {f: _homog(_UNIT, [corners[c] for c in names]) for f, names in QUAD.items()}
+        self.zoom = 1.0                  # see adjust()
+        self.shift = np.zeros(2)         # reference-image pixels
+
+    def adjust(self, scale: float = 1.0, offset_px=(0.0, 0.0), image_size=None) -> "FaceModel":
+        """Fine-tune the whole model on the live camera picture: grow it by
+        `scale` about the image centre, then move it by `offset_px` (x right,
+        y down) in pixels of an image of `image_size` (default: the reference
+        size). E.g. scale 1.5 if the camera crops the sensor 1.5x."""
+        self.zoom = float(scale)
+        k = 1.0 if image_size is None else self.image_size[0] / float(image_size[0])
+        self.shift = np.asarray(offset_px, float) * k
+        return self
 
     @classmethod
     def load(cls, path: str | Path) -> "FaceModel":
@@ -55,7 +67,9 @@ class FaceModel:
         """Grid points (col, row in 0..3) of a face -> image pixels (reference size)."""
         uv = np.atleast_2d(np.asarray(uv, float))
         q = np.c_[uv, np.ones(len(uv))] @ self.H[face].T
-        return self._distort(q[:, :2] / q[:, 2:])
+        p = self._distort(q[:, :2] / q[:, 2:])
+        mid = np.array(self.image_size, float) / 2
+        return mid + self.zoom * (p - mid) + self.shift
 
     def centre_of(self, name: str) -> tuple[float, float]:
         row, col = divmod(int(name[1]) - 1, 3)

@@ -281,8 +281,26 @@ python main.py show-faces            # or: --image photo.jpg
 
 It saves `pi/data/faces_check.jpg` with the curved face outlines, the sticker
 grid and a white box where each sticker is sampled. The lines must sit on the
-grooves and every box inside one sticker. If the camera has moved, the face
-model has to be refitted (or switch to clicked points: below).
+grooves and every box inside one sticker.
+
+If the whole grid is too small or too big (the camera picture is zoomed
+differently from the photo the model was fitted on), first try the full sensor:
+`[camera] full_fov = true`. Otherwise scale and move the grid until it fits,
+then put the values in `pi/config.toml` → `[scan]`:
+
+```bash
+python main.py show-faces --scale 1.3              # grow the grid about the centre
+python main.py show-faces --scale 1.3 --dx 10 --dy -5   # then move it (camera pixels)
+```
+
+```toml
+face_scale = 1.3
+face_offset = [10, -5]
+```
+
+The current values are written at the top of `faces_check.jpg`. If the grid's
+shape no longer fits (the camera was moved or tilted), the face model has to be
+refitted (or switch to clicked points: below).
 
 **Clicked points instead** (`[scan] sticker_source = "rois"`): the older method,
 `pi/data/rois.json` (from the TA6 coordinate guide, or `calibrate-rois`).

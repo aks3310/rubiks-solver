@@ -62,6 +62,27 @@ def test_each_sticker_reads_its_own_colour():
         assert got[n][0] == pytest.approx(value[n]), n
 
 
+def test_scale_and_offset_move_the_whole_grid():
+    m = FaceModel.load(HERE / "data" / "face_model.json")
+    x0, y0 = m.centre_of("D9")
+    mid = np.array(m.image_size) / 2
+    m.adjust(1.5, (12, -8), image_size=(1536, 864))     # offset in camera pixels
+    x1, y1 = m.centre_of("D9")
+    k = m.image_size[0] / 1536
+    assert x1 == pytest.approx(mid[0] + 1.5 * (x0 - mid[0]) + 12 * k)
+    assert y1 == pytest.approx(mid[1] + 1.5 * (y0 - mid[1]) - 8 * k)
+
+
+def test_main_applies_face_scale_from_config():
+    import main
+    cfg = main.load_config(None)
+    plain = main.load_sticker_positions(cfg)["points"]["R9"]
+    cfg["scan"]["face_scale"] = 1.2
+    grown = main.load_sticker_positions(cfg)["points"]["R9"]
+    mid = np.array(MODEL.image_size) / 2
+    assert np.allclose(np.array(grown) - mid, 1.2 * (np.array(plain) - mid))
+
+
 def test_main_reads_stickers_from_the_face_model():
     import main
     cfg = main.load_config(None)

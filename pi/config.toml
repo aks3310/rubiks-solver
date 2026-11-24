@@ -8,6 +8,7 @@ baud = 115200
 width = 1536
 height = 864
 roi_radius = 6             # half-size of the square sampled around each sticker (px)
+full_fov = false           # true = use the whole sensor (binned 2304x1296 mode), not a cropped mode
 settle_s = 0.25            # wait after a move before the photo
 # lens_position = 6.5      # dioptres (1 / distance in m). Leave out to autofocus once.
 
@@ -58,6 +59,9 @@ candidate_faces = "DBR"
 #   "rois"       - the points clicked with `python main.py calibrate-rois`.
 sticker_source = "face_model"
 patch_inset = 0.3          # face model: sample the middle of each sticker (0.3 = middle 40 %)
+# Fit the face model to the live camera picture (check with show-faces):
+face_scale = 1.0           # >1 grows the grid about the image centre (e.g. 1.5 if the camera crops 1.5x)
+face_offset = [0, 0]       # then move it [x right, y down], in camera pixels ([camera] width x height)
 # Stickers that are read (also used by `simulate`). The far corners R1, B3, D1
 # are behind the motor rods, and R2, R4, B2, B6, D2, D4 show glare.
 visible = ["R3","R6","R7","R8","R9",
