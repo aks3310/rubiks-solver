@@ -1,0 +1,7 @@
+# pip packages for the Pi venv (see docs/SETUP.md, part 4).
+# Install picamera2, OpenCV, numpy and scipy with apt instead:
+#   sudo apt install -y python3-picamera2 python3-opencv python3-numpy python3-scipy
+# and create the venv with --system-site-packages. A pip copy of numpy breaks picamera2.
+kociemba>=1.2
+pyserial
+pytest

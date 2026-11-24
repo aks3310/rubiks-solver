@@ -1,0 +1,70 @@
+# Rubik's cube robot - host configuration (Raspberry Pi 5)
+
+[serial]
+port = "/dev/ttyUSB0"      # MKS Gen L v1.0 (CH340). Check with: ls /dev/ttyUSB*
+baud = 115200
+
+[camera]
+width = 1536
+height = 864
+roi_radius = 6             # half-size of the square sampled around each sticker (px)
+settle_s = 0.25            # wait after a move before the photo
+# lens_position = 6.5      # dioptres (1 / distance in m). Leave out to autofocus once.
+
+[motion]
+# Firmware runs 1/8 microstepping: 400 steps per quarter turn.
+# Starting point for tuning (est. ~0.11 s per quarter turn). Raise with
+# `python main.py bench --speed N --accel A` until turns skip, then back off ~15 %.
+max_steps_per_s = 6000     # 6000 sps = 225 rpm
+accel_steps_per_s2 = 150000
+settle_us = 2000           # pause after each move, microseconds
+parallel_opposite = true   # turn R and L (or F and B) at the same time
+quarter_turns_only = true  # every 180-degree turn is done as two 90-degree turns
+# Overshoot: each turn goes overshoot_deg past its target in the direction of
+# travel, then comes back (helps a stiff cube's layer seat fully).
+# Needs firmware v1.2. Applies to every move, also during calibration.
+overshoot = true           # false = turn exactly 90 degrees
+overshoot_deg = 10         # 0-30; 10 deg = 44 microsteps at 1/8
+
+[shake]
+# Wiggle the faces back and forth so a stiff or slightly misaligned cube
+# settles. Faces always end exactly where they started. Needs firmware v1.3.
+# Run it any time with: python main.py shake
+amplitude_deg = 3          # 0.5-15; how far each face swings each way
+cycles = 5                 # 1-50 back-and-forth swings
+faces = "FRBLD"            # which motors shake
+before_scan = false        # shake once before the first photo (scan is not timed)
+before_solve = false       # shake once after the scan, before the solution (adds to the timed part)
+
+[scan]
+max_seq_len = 3
+min_views = 1              # >1 = read each sticker that many times (greedy planner, more photos)
+min_photos = true          # try the 2-photo plan first (fewest photos possible)
+# Faces the camera can see: it sits at the back-bottom-right corner (D-B-R).
+# Used by calibrate-rois to ask for points. The D, B and R centres are behind
+# the motor adapters, so they are never asked for.
+candidate_faces = "DBR"
+# Stickers the camera cannot read (reflections, rods): skip them with 's' in
+# calibrate-rois. The scan plan then uses only the readable ones and turns
+# faces between photos until every sticker has been read once. With two edge
+# stickers unreadable on each face this needs at least 4 photos (an edge
+# sticker always stays an edge, and each photo then shows only 6 edges).
+# Facelets used by `simulate`. For the real robot the list comes from data/rois.json.
+visible = ["D1","D2","D3","D4","D6","D7","D8","D9",
+           "B1","B2","B3","B4","B6","B7","B8","B9",
+           "R1","R2","R3","R4","R6","R7","R8","R9"]
+
+[solver]
+try_orientations = true    # try all 24 cube orientations, keep the fastest plan
+time_budget_s = 1.0        # stop trying orientations after this (software target is < 2 s)
+
+[calibration]
+# Moves during calibrate-colours (scan and turning the cube back).
+turn_delay_s = 1.0         # pause after every single turn
+parallel_opposite = false  # false = opposite faces never turn at the same time
+confirm_each_turn = true   # wait for a key press before every turn
+
+[files]
+rois = "data/rois.json"
+colours = "data/colours.json"
+scan_plans = "data/scan_plans.json"   # remembered scan plans; delete to search again
