@@ -17,8 +17,8 @@
 Add --json (before the command) to end with one line "RESULT {...}" for the
 web UI (pi/web_app.py), e.g.  python main.py --json read
 
-Load the cube the same way every time: the orientation used for
-calibrate-colours (we use white on top, green at the front).
+Load the cube the same way every time: [cube] top / front in config.toml
+(default white on top, green at the front).
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from pathlib import Path
 
 import numpy as np
 
-from rubik.cube import FACES, SOLVED, apply, describe, facelet_name, net
+from rubik.cube import FACES, SOLVED, apply, describe, face_colours, facelet_name, net
 from rubik.moves import fmt, invert, parallelize, parse, simplify, tokens_to_moves
 from rubik.scan_planner import plan_scan, scan_moves
 from rubik.solver import known_answer_solver, solve
@@ -50,6 +50,20 @@ def load_config(path: str | None) -> dict:
 
 def cfg_path(cfg, key) -> Path:
     return (cfg["_dir"] / cfg["files"][key]).resolve()
+
+
+def cube_colours(cfg) -> dict[str, str]:
+    """Colour on each face as the cube is loaded ([cube] top / front)."""
+    c = cfg.get("cube", {})
+    try:
+        return face_colours(c.get("top", "white"), c.get("front", "green"))
+    except ValueError as e:
+        raise CommandFailed(f"config.toml: {e}")
+
+
+def loading_hint(cfg) -> str:
+    fc = cube_colours(cfg)
+    return f"{fc['U']} on top, {fc['F']} at the front"
 
 
 def plan_cache(cfg) -> Path:
@@ -458,11 +472,13 @@ def cmd_calibrate_colours(cfg, args):
     """Store one reference colour per face.
 
     Default: the cube must be SOLVED. With --scrambled the cube can be in any
-    state (still loaded white up, green front): the 48 stickers are split into
-    6 groups of 8 and named, and the result must be a real cube.
+    state (still loaded as in [cube] top / front): the 48 stickers are split
+    into 6 groups of 8 and named, and the result must be a real cube.
     """
     from rubik.vision import (collect_observations, references_from_scrambled,
-                              references_from_solved, save_json)
+                              references_from_solved, save_references)
+    fc = cube_colours(cfg)
+    print(f"Cube must be loaded {loading_hint(cfg)} ([cube] in config.toml).")
     rois, steps = _scan_setup(cfg)
     cal = cfg.get("calibration", {})
     parallel = cal.get("parallel_opposite", False)
@@ -481,21 +497,21 @@ def cmd_calibrate_colours(cfg, args):
         robot.close()
     if args.scrambled:
         try:
-            refs, state = references_from_scrambled(obs)
+            refs, state = references_from_scrambled(obs, face_colour=fc)
         except ValueError as e:
             print(f"Calibration failed: {e}")
             sys.exit(2)
         print("detected cube (check it matches the real cube):\n"
-              + net(state, colours=True, ansi=sys.stdout.isatty()))
+              + net(state, colours=True, ansi=sys.stdout.isatty(), face_colour=fc))
     else:
         refs = references_from_solved(obs)
-    save_json(cfg_path(cfg, "colours"), refs)
+    save_references(cfg_path(cfg, "colours"), refs, fc)
     names = list(refs)
     gaps = sorted((float(np.linalg.norm(np.subtract(refs[a], refs[b]))), a, b)
                   for i, a in enumerate(names) for b in names[i + 1:])
     print("reference colours saved. Closest pairs (bigger is better):")
     for d, a, b in gaps[:3]:
-        print(f"  {a}-{b}: {d:.1f}")
+        print(f"  {a}-{b} ({fc[a]}-{fc[b]}): {d:.1f}")
     if gaps[0][0] < 15:
         print("WARNING: two faces look very similar - improve lighting and recalibrate")
 
@@ -504,18 +520,22 @@ def scan_cube(cfg, robot, cam, stamp: str):
     """Scan (photos, then the scan moves are undone, so the cube is back in
     the scramble it was given) and work out the colours.
     Returns (facelets, least certain stickers, scan seconds)."""
-    from rubik.vision import classify, collect_observations
+    from rubik.vision import classify, collect_observations, load_references
+    fc = cube_colours(cfg)
     rois, steps = _scan_setup(cfg)
     colours = cfg_path(cfg, "colours")
     if not colours.exists():
         raise CommandFailed("no colour calibration yet: run  python main.py calibrate-colours")
-    refs = json.loads(colours.read_text())
+    refs, note = load_references(colours, fc)
+    if note:
+        print(note)
     t0 = time.time()
     samples = run_scan(cfg, robot, cam, rois, steps, HERE / "logs" / stamp,
                        turn_delay_s=cfg["scan"].get("turn_delay_s", 0.0))
     scan_s = time.time() - t0
     original, conf = classify(collect_observations(samples, steps), refs)
-    print("detected cube:\n" + net(original, colours=True, ansi=sys.stdout.isatty()))
+    print("detected cube:\n" + net(original, colours=True, ansi=sys.stdout.isatty(),
+                                     face_colour=fc))
     worst = sorted(conf.items(), key=lambda kv: -kv[1])[:3]
     print("least certain stickers:", ", ".join(f"{facelet_name(p)} ({c:.0f})" for p, c in worst))
     print(f"scan {scan_s:.2f} s ({len(scan_moves(steps))} scan moves, then undone); "
@@ -665,7 +685,7 @@ def main():
     p.add_argument("--image", help="use a saved photo instead of the camera")
     p = sub.add_parser("calibrate-colours")
     p.add_argument("--scrambled", action="store_true",
-                   help="cube does not need to be solved (still white up, green front)")
+                   help="cube does not need to be solved (still loaded as in [cube])")
     sub.add_parser("read", help="scan the cube and print its state (cube ends as loaded)")
     p = sub.add_parser("solve")
     p.add_argument("--dry-run", action="store_true",

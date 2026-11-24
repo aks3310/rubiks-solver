@@ -26,6 +26,7 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -114,16 +115,30 @@ class FakeRunner:
 class Controller:
     """One command at a time; remembers the cube state from the last read."""
 
-    def __init__(self, runner):
+    def __init__(self, runner, config: str | None = None):
         self.runner = runner
+        self.config = Path(config) if config else HERE / "config.toml"
         self.lock = threading.Lock()
         self.running: str | None = None
         self.read_state: str | None = None      # from the camera, still valid
         self.last_log = ""
 
+    def face_colours(self) -> tuple[dict[str, str], str | None]:
+        """Colour on each face as loaded ([cube] top / front in config.toml);
+        read every time, so an edit shows without restarting the server."""
+        from rubik.cube import STANDARD_SCHEME, face_colours
+        try:
+            with open(self.config, "rb") as fh:
+                c = tomllib.load(fh).get("cube", {})
+            return face_colours(c.get("top", "white"), c.get("front", "green")), None
+        except (OSError, ValueError, tomllib.TOMLDecodeError) as e:
+            return dict(STANDARD_SCHEME), f"config.toml [cube]: {e}"
+
     def status(self) -> dict:
+        colours, error = self.face_colours()
         return {"busy": self.running is not None, "running": self.running,
-                "read_state": self.read_state,
+                "read_state": self.read_state, "face_colours": colours,
+                "config_error": error,
                 "fake": isinstance(self.runner, FakeRunner)}
 
     def _run(self, label: str, args: list[str]) -> tuple[int, dict]:
@@ -144,7 +159,8 @@ class Controller:
             return 422, {"ok": False, "error": "send 1-60 moves"}
         bad = [m for m in moves if not isinstance(m, str) or not MOVE_RE.match(m)]
         if bad:
-            msg = ("the top (white) face has no motor; use F, R, B, L, D"
+            msg = (f"the top ({self.face_colours()[0]['U']}) face has no motor; "
+                   "use F, R, B, L, D"
                    if any(isinstance(m, str) and m.upper().startswith("U") for m in bad)
                    else f"not a move: {bad[0]!r}")
             return 422, {"ok": False, "error": msg}
@@ -233,11 +249,14 @@ def main():
     ap.add_argument("--fake-robot", action="store_true", help="pretend robot, no hardware")
     args = ap.parse_args()
     runner = FakeRunner() if args.fake_robot else MainRunner(args.config)
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(Controller(runner)))
+    ctl = Controller(runner, args.config)
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(ctl))
     where = "localhost" if args.host in ("0.0.0.0", "") else args.host
     print(f"Robot dashboard on http://{where}:{args.port}"
           + ("  (pretend robot)" if args.fake_robot else "")
           + "  - open it from another computer with the Pi's IP address. Ctrl+C stops.")
+    colours, error = ctl.face_colours()
+    print(error or f"Cube loaded {colours['U']} on top, {colours['F']} at the front ([cube] in config.toml)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .cube import CENTRES, FACES, facelet_index
+from .cube import CENTRES, FACES, STANDARD_SCHEME, facelet_index
 
 # ------------------------------------------------------------------ camera
 
@@ -179,9 +179,9 @@ def references_from_solved(obs: dict[int, list[np.ndarray]]) -> dict[str, list[f
     return {f: np.mean(v, axis=0).tolist() for f, v in per_face.items()}
 
 
-# Standard colour scheme, loaded white on top and green at the front.
-FACE_COLOUR = {"U": "white", "R": "red", "F": "green",
-               "D": "yellow", "L": "orange", "B": "blue"}
+# Colour on each face, loaded white on top and green at the front (the default;
+# [cube] top / front in config.toml changes it, see cube.face_colours).
+FACE_COLOUR = dict(STANDARD_SCHEME)
 # Typical sticker colours (sRGB). Only used to NAME the six colour groups found
 # on a scrambled cube; the saved references are the measured colours.
 NOMINAL_RGB = {"white": (255, 255, 255), "yellow": (255, 213, 0),
@@ -287,6 +287,31 @@ def classify(obs: dict[int, list[np.ndarray]], refs: dict[str, list[float]]
         state[p] = FACES[c // 8]
         conf[p] = float(cost[r, c])
     return "".join(state), conf
+
+
+def save_references(path: str | Path, refs: dict[str, list[float]],
+                    face_colour: dict[str, str]) -> None:
+    """Save one reference colour per face, plus which colour each face had
+    when calibrated (so a later change of loading orientation can be undone)."""
+    save_json(path, {**{f: list(refs[f]) for f in FACES}, "_face_colours": face_colour})
+
+
+def load_references(path: str | Path, face_colour: dict[str, str]
+                    ) -> tuple[dict[str, list[float]], str | None]:
+    """Reference colours keyed by face (U R F D L B) for the cube loaded as
+    `face_colour`. If they were calibrated with another orientation, they are
+    remapped by colour (the stickers look the same whichever face they are on).
+    Files without "_face_colours" were calibrated white up, green front.
+    Returns (references, note about a remap or None)."""
+    data = json.loads(Path(path).read_text())
+    refs = {f: data[f] for f in FACES}
+    saved = data.get("_face_colours", FACE_COLOUR)
+    if saved == face_colour:
+        return refs, None
+    by_colour = {saved[f]: refs[f] for f in FACES}
+    note = (f"colour calibration was made with {saved['U']} up, {saved['F']} front; "
+            f"using it for {face_colour['U']} up, {face_colour['F']} front")
+    return {f: by_colour[face_colour[f]] for f in FACES}, note
 
 
 def save_json(path: str | Path, data) -> None:

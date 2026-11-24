@@ -142,22 +142,33 @@ def describe(name: str) -> str:
     return f"{name}: {_FACE_WORD[name[0]]} face, {kind}{tail}"
 
 
-# Sticker colour of each face when the cube is loaded white up, green front.
-COLOUR_LETTER = {"U": "W", "R": "R", "F": "G", "D": "Y", "L": "O", "B": "B"}
-_ANSI = {"U": "97", "R": "91", "F": "92", "D": "93", "L": "38;5;208", "B": "94"}
+# Standard colour scheme, as loaded white on top and green at the front.
+# Every other way of loading the cube is a whole-cube rotation of this
+# (see face_colours); the robot only cares which colour is on which face.
+STANDARD_SCHEME = {"U": "white", "R": "red", "F": "green",
+                   "D": "yellow", "L": "orange", "B": "blue"}
+_COLOUR_LETTER = {"white": "W", "red": "R", "green": "G", "yellow": "Y",
+                  "orange": "O", "blue": "B"}
+_COLOUR_ANSI = {"white": "97", "red": "91", "green": "92", "yellow": "93",
+                "orange": "38;5;208", "blue": "94"}
 
 
-def net(state: str, colours: bool = False, ansi: bool = False) -> str:
+def net(state: str, colours: bool = False, ansi: bool = False,
+        face_colour: dict[str, str] | None = None) -> str:
     """Text drawing of a state as an unfolded cube (U on top, then L F R B, then D).
 
-    colours: show sticker colours (W white, R red, G green, Y yellow, O orange,
-             B blue) instead of face letters, with the faces labelled.
-    ansi:    also colour each letter for a terminal."""
+    colours:     show sticker colours (W white, R red, G green, Y yellow,
+                 O orange, B blue) instead of face letters, with faces labelled.
+    ansi:        also colour each letter for a terminal.
+    face_colour: colour on each face as loaded (default white up, green front;
+                 see face_colours)."""
+    face_colour = face_colour or STANDARD_SCHEME
+
     def cell(x: str) -> str:
         if not colours:
             return x
-        c = COLOUR_LETTER[x]
-        return f"\033[1;{_ANSI[x]}m{c}\033[0m" if ansi else c
+        c = _COLOUR_LETTER[face_colour[x]]
+        return f"\033[1;{_COLOUR_ANSI[face_colour[x]]}m{c}\033[0m" if ansi else c
 
     f = {face: [cell(x) for x in state[i * 9:(i + 1) * 9]] for i, face in enumerate(FACES)}
     rows = []
@@ -174,7 +185,7 @@ def net(state: str, colours: bool = False, ansi: bool = False) -> str:
         rows.insert(4, "left   front  right  back")
         rows.insert(4, "")
         rows.append("(W white, R red, G green, Y yellow, O orange, B blue; "
-                    "held white up, green front)")
+                    f"held {face_colour['U']} up, {face_colour['F']} front)")
     return "\n".join(rows)
 
 
@@ -227,6 +238,25 @@ def rotate_state(state: str, basis) -> str:
         j = _INDEX[(_apply_basis(basis, pos), _apply_basis(basis, nrm))]
         out[j] = fmap[state[i]]
     return "".join(out)
+
+
+def face_colours(top: str = "white", front: str = "green",
+                 scheme: dict[str, str] = STANDARD_SCHEME) -> dict[str, str]:
+    """Colour on each face (U R F D L B) when the cube is loaded with `top`
+    facing up and `front` facing the front. The other four follow from the
+    cube's colour scheme, e.g. top yellow, front green -> right orange."""
+    top, front = top.strip().lower(), front.strip().lower()
+    known = sorted(scheme.values())
+    for name, colour in (("top", top), ("front", front)):
+        if colour not in known:
+            raise ValueError(f"[cube] {name} = {colour!r}: use one of {', '.join(known)}")
+    for basis in ROTATIONS:
+        fmap = rotation_face_map(basis)
+        colours = {fmap[f]: scheme[f] for f in FACES}
+        if colours["U"] == top and colours["F"] == front:
+            return {f: colours[f] for f in FACES}
+    raise ValueError(f"[cube] front = {front!r} cannot be next to top = {top!r}: "
+                     "they are the same or opposite colours")
 
 
 def is_valid_counts(state: str) -> bool:
