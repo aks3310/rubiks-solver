@@ -331,8 +331,12 @@ def cmd_shake(cfg, args):
 
 def cmd_motors(cfg, args):
     robot = open_robot(cfg)
-    robot.enable(args.state == "on")
-    robot.close()
+    try:
+        robot.enable(args.state == "on")
+    finally:
+        robot.close()
+    print(f"motors {args.state}")
+    emit(args, ok=True, motors=args.state == "on")
 
 
 def cmd_calibrate_rois(cfg, args):

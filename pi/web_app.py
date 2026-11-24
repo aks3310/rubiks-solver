@@ -5,13 +5,17 @@
     python web_app.py --fake-robot    # no hardware: a pretend robot (for testing the page)
 
 Every button runs main.py, so the dashboard does exactly what the command
-line does (same config.toml, speed, overshoot, scan plan and solver):
+line does (same config.toml, speed, overshoot, scan plan and solver). The
+page shows each move on its 3D cube first, then sends it to the robot:
 
-    Scramble  ->  python main.py --json move "<moves>"
+    Scramble, a clicked face (Live mode), Send recorded moves (Record mode)
+              ->  python main.py --json move "<moves>"
     Read cube ->  python main.py --json read
-    Solve     ->  python main.py --json solve --state <last read state>
-                  (or a full scan first if the cube has not been read since
-                  the last scramble)
+    Solve     ->  python main.py --json solve --dry-run --state <last read state>
+                  (a full scan first if the cube has not been read since it
+                  was last turned), shown on the 3D cube, then
+                  python main.py --json move "<solution steps>"
+    Motors    ->  python main.py --json motors on|off
 
 Only one command runs at a time (they share the USB link and the camera).
 While this server runs, do not use main.py by hand at the same time.
@@ -35,7 +39,7 @@ HERE = Path(__file__).resolve().parent
 PAGE = HERE / "web" / "index.html"
 SOLVED = "U" * 9 + "R" * 9 + "F" * 9 + "D" * 9 + "L" * 9 + "B" * 9
 MOVE_RE = re.compile(r"^[FRBLD](2|')?$")      # no U: the top face has no motor
-TIMEOUT_S = {"move": 120, "read": 300, "solve": 400}
+TIMEOUT_S = {"move": 120, "read": 300, "solve": 400, "motors": 60}
 
 
 # --------------------------------------------------------------- runners
@@ -82,15 +86,18 @@ class FakeRunner:
         self.state, self.history, self.delay = SOLVED, [], delay_s
 
     def run(self, args: list[str]) -> tuple[dict, str]:
-        from rubik.moves import fmt, invert, parse
+        from rubik.moves import fmt, invert, parse, tokens_to_moves
         from rubik.solver import known_answer_solver, solve
         time.sleep(self.delay)
         if args[0] == "move":
-            moves = args[1].split()
+            tokens = args[1].split()
+            moves = fmt(tokens_to_moves(tokens))
             self.state = self.apply(self.state, moves)
             self.history += moves
-            return {"ok": True, "moves": moves, "motion_ms": 90 * len(moves)}, \
-                f"[pretend robot] done: {len(moves)} move(s)"
+            return {"ok": True, "moves": tokens, "motion_ms": 90 * len(tokens)}, \
+                f"[pretend robot] done: {len(tokens)} move(s)"
+        if args[0] == "motors":
+            return {"ok": True, "motors": args[1] == "on"}, f"[pretend robot] motors {args[1]}"
         if args[0] == "read":
             return {"ok": True, "facelets": self.state, "valid": True,
                     "least_certain": ["D2", "B4", "R6"], "scan_s": 3.1,
@@ -101,11 +108,14 @@ class FakeRunner:
                 return {"ok": False, "error": "the given state is not the robot's cube"}, ""
             fn = known_answer_solver(state, fmt(invert(parse(" ".join(self.history)))))
             plan = solve(state, solver_fn=fn, quarter_turns_only=True)
+            result = {"ok": True, "facelets": state, "scanned": "--state" not in args,
+                      "solver_moves": plan.solver_moves, "robot_moves": plan.robot_moves,
+                      "tokens": plan.tokens, "scan_s": 0.0 if "--state" in args else 3.1,
+                      "software_s": 0.05}
+            if "--dry-run" in args:
+                return {**result, "executed": False}, "[pretend robot] solution found (not run)"
             self.state, self.history = SOLVED, []
-            return {"ok": True, "facelets": state, "scanned": "--state" not in args,
-                    "solver_moves": plan.solver_moves, "robot_moves": plan.robot_moves,
-                    "tokens": plan.tokens, "scan_s": 0.0 if "--state" in args else 3.1,
-                    "software_s": 0.05, "executed": True, "shake_ms": 0,
+            return {**result, "executed": True, "shake_ms": 0,
                     "motion_ms": 95 * len(plan.tokens), "total_s": 0.1 * len(plan.tokens)}, \
                 "[pretend robot] solved"
         return {"ok": False, "error": f"unknown command {args[0]}"}, ""
@@ -121,6 +131,8 @@ class Controller:
         self.lock = threading.Lock()
         self.running: str | None = None
         self.read_state: str | None = None      # from the camera, still valid
+        self.plan: dict | None = None           # last solution found, not yet run
+        self.motors: bool | None = None         # as left by the last command
         self.last_log = ""
 
     def face_colours(self) -> tuple[dict[str, str], str | None]:
@@ -138,7 +150,8 @@ class Controller:
         colours, error = self.face_colours()
         return {"busy": self.running is not None, "running": self.running,
                 "read_state": self.read_state, "face_colours": colours,
-                "config_error": error,
+                "config_error": error, "motors": self.motors,
+                "plan_ready": self.plan is not None,
                 "fake": isinstance(self.runner, FakeRunner)}
 
     def _run(self, label: str, args: list[str]) -> tuple[int, dict]:
@@ -149,12 +162,14 @@ class Controller:
             result, log = self.runner.run(args)
             self.last_log = log
             result["log"] = log[-4000:]
+            if result.get("ok") and args[0] in ("move", "read", "solve"):
+                self.motors = True               # main.py turns the motors on to move
             return (200 if result.get("ok") else 422), result
         finally:
             self.running = None
             self.lock.release()
 
-    def scramble(self, moves) -> tuple[int, dict]:
+    def scramble(self, moves, label: str = "scrambling") -> tuple[int, dict]:
         if not isinstance(moves, list) or not moves or len(moves) > 60:
             return 422, {"ok": False, "error": "send 1-60 moves"}
         bad = [m for m in moves if not isinstance(m, str) or not MOVE_RE.match(m)]
@@ -164,15 +179,52 @@ class Controller:
                    if any(isinstance(m, str) and m.upper().startswith("U") for m in bad)
                    else f"not a move: {bad[0]!r}")
             return 422, {"ok": False, "error": msg}
-        code, result = self._run("scrambling", ["move", " ".join(moves)])
+        code, result = self._run(label, ["move", " ".join(moves)])
         if result.get("ok") or code == 422:
             self.read_state = None       # the cube changed (or may have): read it again
+            self.plan = None
         return code, result
 
     def read(self) -> tuple[int, dict]:
         code, result = self._run("reading the cube", ["read"])
         if result.get("ok") and result.get("valid", True):
             self.read_state = result["facelets"]
+            self.plan = None
+        return code, result
+
+    def find_solution(self) -> tuple[int, dict]:
+        """Solve without turning the solution yet (scans first if needed),
+        so the page can show it before the robot runs it."""
+        args = ["solve", "--dry-run"] + (["--state", self.read_state] if self.read_state else [])
+        label = "finding the solution" if self.read_state else "reading and finding the solution"
+        code, result = self._run(label, args)
+        if result.get("ok"):
+            self.read_state = result["facelets"]          # the cube is in this state
+            self.plan = {"tokens": result.get("tokens", []), "facelets": result["facelets"]}
+        return code, result
+
+    def run_solution(self) -> tuple[int, dict]:
+        """Turn the solution found by find_solution on the robot."""
+        plan = self.plan
+        if plan is None:
+            return 409, {"ok": False, "error": "no solution to run: press Solve again"}
+        if not plan["tokens"]:
+            self.plan = None
+            return 200, {"ok": True, "moves": [], "motion_ms": 0, "log": "already solved"}
+        code, result = self._run("turning the solution", ["move", " ".join(plan["tokens"])])
+        if result.get("ok"):
+            self.read_state, self.plan = SOLVED, None
+        elif code != 409:
+            self.read_state, self.plan = None, None      # unknown how far it got
+        return code, result
+
+    def set_motors(self, on) -> tuple[int, dict]:
+        if not isinstance(on, bool):
+            return 422, {"ok": False, "error": "send {\"on\": true} or {\"on\": false}"}
+        code, result = self._run("motors " + ("on" if on else "off"),
+                                 ["motors", "on" if on else "off"])
+        if result.get("ok"):
+            self.motors = on
         return code, result
 
     def solve(self) -> tuple[int, dict]:
@@ -229,7 +281,15 @@ def make_handler(ctl: Controller):
                 self._reply(*ctl.scramble(self._body().get("moves")))
             elif route == "/api/read":
                 self._reply(*ctl.read())
-            elif route == "/api/solve":
+            elif route == "/api/move":            # Live mode: one clicked face
+                self._reply(*ctl.scramble(self._body().get("moves"), "turning a face"))
+            elif route == "/api/find-solution":
+                self._reply(*ctl.find_solution())
+            elif route == "/api/run-solution":
+                self._reply(*ctl.run_solution())
+            elif route == "/api/motors":
+                self._reply(*ctl.set_motors(self._body().get("on")))
+            elif route == "/api/solve":           # find and run in one step
                 self._reply(*ctl.solve())
             else:
                 self._reply(404, {"error": "not found"})

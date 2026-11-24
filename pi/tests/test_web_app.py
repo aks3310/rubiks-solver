@@ -85,6 +85,52 @@ def test_one_command_at_a_time(server):
     assert results[0][0] == 200
 
 
+def test_solution_is_found_first_then_run(server):
+    url, ctl = server
+    call(url, "/api/scramble", {"moves": ["R", "D'", "F2"]})
+    scrambled = ctl.runner.state
+    code, p = call(url, "/api/find-solution", {})
+    assert code == 200 and p["executed"] is False and p["scanned"] is True
+    assert ctl.runner.state == scrambled                 # nothing turned yet
+    assert ctl.read_state == scrambled and ctl.status()["plan_ready"]
+    code, r = call(url, "/api/run-solution", {})
+    assert code == 200 and r["ok"] and r["moves"] == p["tokens"]
+    assert ctl.runner.state == SOLVED and ctl.read_state == SOLVED
+    assert not ctl.status()["plan_ready"]
+    code, r = call(url, "/api/run-solution", {})       # nothing left to run
+    assert code == 409
+
+
+def test_a_turn_after_finding_the_solution_cancels_it(server):
+    url, ctl = server
+    call(url, "/api/scramble", {"moves": ["F"]})
+    call(url, "/api/find-solution", {})
+    call(url, "/api/move", {"moves": ["R"]})              # Live mode click
+    assert ctl.plan is None and ctl.read_state is None
+    code, r = call(url, "/api/run-solution", {})
+    assert code == 409 and ctl.runner.state != SOLVED
+
+
+def test_live_move_is_one_face(server):
+    url, ctl = server
+    code, r = call(url, "/api/move", {"moves": ["L"]})
+    assert code == 200 and ctl.runner.history == ["L"]
+    code, r = call(url, "/api/move", {"moves": ["U"]})
+    assert code == 422 and "no motor" in r["error"]
+
+
+def test_motors_on_off_and_indicator(server):
+    url, ctl = server
+    assert call(url, "/api/status")[1]["motors"] is None     # unknown at start
+    code, r = call(url, "/api/motors", {"on": False})
+    assert code == 200 and r["motors"] is False
+    assert call(url, "/api/status")[1]["motors"] is False
+    call(url, "/api/move", {"moves": ["F"]})                   # moving turns them on
+    assert call(url, "/api/status")[1]["motors"] is True
+    code, r = call(url, "/api/motors", {"on": "yes"})
+    assert code == 422
+
+
 def test_parse_result_from_main_py_output():
     out = 'scan plan: ...\ndone\nRESULT {"ok": true, "motion_ms": 12}\n'
     assert parse_result(out, 0, out) == {"ok": True, "motion_ms": 12}
