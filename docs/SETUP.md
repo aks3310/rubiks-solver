@@ -181,7 +181,7 @@ python -m pytest -q
 python main.py simulate -n 20
 ```
 
-Expect `106 passed` (it takes about a minute: some tests search scan plans) and
+Expect `112 passed` (it takes about a minute: some tests search scan plans) and
 `20/20 solved in simulation`. The first solve builds Kociemba's tables (a few
 seconds to a minute); later solves are fast.
 
@@ -239,12 +239,26 @@ so the light must be on before you start it.
 
 ### Fix ISO, shutter speed and white balance
 
-By default the camera picks ISO, shutter speed and white balance itself every
-time it starts, so calibration and a later solve can see slightly different
-colours (red and orange suffer most). Fix them instead:
+Without fixed values the camera picks ISO, shutter speed and white balance
+itself every time it starts, so calibration and a later solve can see slightly
+different colours (red and orange suffer most). So:
 
-1. With the cube loaded and the light on, run the sweep (closes nothing else
-   for you: stop anything using the camera first):
+**`calibrate-colours` fixes them for you.** After it saves the colours it
+writes the camera settings it used into `pi/config.toml` → `[camera]`:
+
+```toml
+iso = 130   # set by calibrate-colours 2026-11-25 15:10
+shutter = 7900   # set by calibrate-colours 2026-11-25 15:10
+white_balance = [2.05, 1.45]   # set by calibrate-colours 2026-11-25 15:10
+```
+
+Every later run (`read`, `solve`, the dashboard) then uses exactly these.
+`[calibration] save_camera = false` turns this off.
+
+**To choose better values** (less glare, red and orange more different):
+
+1. With the cube loaded and the light on, run the sweep (stop anything else
+   using the camera first):
 
    ```bash
    python exposure_sweep.py              # 5 ISO x 7 shutter x 3 white balances
@@ -255,19 +269,14 @@ colours (red and orange suffer most). Fix them instead:
    `summary.csv`, in `pi/logs/sweep-<date-time>/`. It suggests the lowest ISO
    without glare in the sticker boxes; pick the white balance where red and
    orange look most different.
-2. Put the chosen values in `pi/config.toml`:
+2. Put the chosen values in `[camera]` (`shutter` can also be `"1/250"`).
+3. Run `calibrate-colours` again: it keeps your values and records the
+   colours with them.
 
-   ```toml
-   [camera]
-   iso = 200                    # 100-1600
-   shutter = "1/250"            # or microseconds, e.g. 4000
-   white_balance = [1.9, 1.6]   # red and blue gains
-   ```
-
-   Anything left out stays automatic for that run.
-3. Run `calibrate-colours` again. It records the camera settings with the
-   colours, and `read` / `solve` print a **WARNING** if their camera settings
-   differ from the calibration's.
+**To let the camera choose afresh** (for example after changing the lighting),
+comment the three lines out and run `calibrate-colours`; it writes its new
+choice back. `read` / `solve` print a **WARNING** whenever their camera
+settings differ from the calibration's.
 
 Every run prints the settings it uses, for example
 `camera: ISO 200, 1/250 s (4000 us), white balance 1.90/1.60  (fixed: ISO, shutter, white balance)`.
@@ -424,7 +433,9 @@ the cube where it is).
 It scans, then **turns the cube back exactly as you loaded it**, then saves one
 reference colour per face to `data/colours.json` and prints the three closest
 colour pairs. With `--scrambled` it also prints the cube it detected: check it
-matches the real cube.
+matches the real cube. Finally it writes the camera's ISO, shutter speed and
+white balance into `[camera]` in `pi/config.toml`, so every later run uses the
+same settings (part 6).
 
 **Check:** the closest pair should be well above 15. A warning means two faces
 look too similar (usually red/orange or yellow/green on a stickerless cube):
