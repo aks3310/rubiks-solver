@@ -45,9 +45,10 @@ def test_patches_sit_inside_their_sticker():
         assert 0.1 < area(quad) / area(cell) < 0.25          # middle 40 % per side = 16 %
 
 
-def test_each_sticker_reads_its_own_colour():
+def test_each_sticker_reads_its_own_colour(monkeypatch):
     """Paint every sticker cell a different value, sample the camera-size image."""
-    sys.modules["cv2"] = types.SimpleNamespace(cvtColor=lambda im, code: im, COLOR_BGR2LAB=0)
+    monkeypatch.setitem(sys.modules, "cv2",
+                        types.SimpleNamespace(cvtColor=lambda im, code: im, COLOR_BGR2LAB=0))
     from rubik.vision import sample_lab
     w, h = MODEL.image_size
     img = np.zeros((h, w, 3), np.uint8)

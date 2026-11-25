@@ -17,6 +17,11 @@ page shows each move on its 3D cube first, then sends it to the robot:
                   python main.py --json move "<solution steps>"
     Motors    ->  python main.py --json motors on|off
 
+The page also shows a live camera feed (/stream.mjpg, with the face outlines
+if ?outlines=1). The camera is opened only while someone watches, and is
+handed over to main.py while Read or Solve takes photos. --no-camera turns
+the feed off.
+
 Only one command runs at a time (they share the USB link and the camera).
 While this server runs, do not use main.py by hand at the same time.
 Python standard library only.
@@ -40,6 +45,7 @@ PAGE = HERE / "web" / "index.html"
 SOLVED = "U" * 9 + "R" * 9 + "F" * 9 + "D" * 9 + "L" * 9 + "B" * 9
 MOVE_RE = re.compile(r"^[FRBLD](2|')?$")      # no U: the top face has no motor
 TIMEOUT_S = {"move": 120, "read": 300, "solve": 400, "motors": 60}
+USES_CAMERA = ("read", "solve", "calibrate-colours")    # main.py commands that take photos
 
 
 # --------------------------------------------------------------- runners
@@ -125,8 +131,9 @@ class FakeRunner:
 class Controller:
     """One command at a time; remembers the cube state from the last read."""
 
-    def __init__(self, runner, config: str | None = None):
+    def __init__(self, runner, config: str | None = None, live=None):
         self.runner = runner
+        self.live = live                        # LiveFeed, or None
         self.config = Path(config) if config else HERE / "config.toml"
         self.lock = threading.Lock()
         self.running: str | None = None
@@ -151,6 +158,7 @@ class Controller:
         return {"busy": self.running is not None, "running": self.running,
                 "read_state": self.read_state, "face_colours": colours,
                 "config_error": error, "motors": self.motors,
+                "camera": self.live.status() if self.live else {"state": "disabled"},
                 "plan_ready": self.plan is not None,
                 "fake": isinstance(self.runner, FakeRunner)}
 
@@ -158,7 +166,10 @@ class Controller:
         if not self.lock.acquire(blocking=False):
             return 409, {"ok": False, "error": f"the robot is busy ({self.running})"}
         self.running = label
+        lend = self.live is not None and args[0] in USES_CAMERA
         try:
+            if lend:
+                self.live.block(label)          # hand the camera to main.py
             result, log = self.runner.run(args)
             self.last_log = log
             result["log"] = log[-4000:]
@@ -166,6 +177,8 @@ class Controller:
                 self.motors = True               # main.py turns the motors on to move
             return (200 if result.get("ok") else 422), result
         finally:
+            if lend:
+                self.live.unblock()
             self.running = None
             self.lock.release()
 
@@ -272,8 +285,26 @@ def make_handler(ctl: Controller):
                 self._reply(200, ctl.status())
             elif route == "/api/log":
                 self._reply(200, {"log": ctl.last_log[-4000:]})
+            elif route == "/stream.mjpg":
+                self._stream("outlines=1" in (urlparse(self.path).query or ""))
             else:
                 self._reply(404, {"error": "not found"})
+
+        def _stream(self, outlines: bool) -> None:
+            if ctl.live is None:
+                self._reply(404, {"error": "live camera feed is off (--no-camera)"})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            try:
+                for jpg in ctl.live.frames(outlines):
+                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                     + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass                              # the viewer closed the page
 
         def do_POST(self):
             route = urlparse(self.path).path
@@ -298,9 +329,25 @@ def make_handler(ctl: Controller):
                 self._reply(404, {"error": "not found"})
 
         def log_message(self, fmt, *args):
-            if not self.path.startswith("/api/status"):
+            if not self.path.startswith(("/api/status", "/stream.mjpg")):
                 sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
     return Handler
+
+
+def make_live_feed(config: str | None, fake: bool):
+    """The live camera feed, drawing outlines like main.py show-faces."""
+    try:
+        import main as robot_main
+        from live_feed import FakeSource, LiveFeed, PiCameraSource
+        cfg = robot_main.load_config(config)
+    except Exception as e:                    # e.g. numpy / OpenCV missing
+        print(f"live camera feed off: {e}")
+        return None
+    if fake:
+        source = lambda: FakeSource(cfg, HERE.parent / "docs" / "face_quads.jpg")  # noqa: E731
+    else:
+        source = lambda: PiCameraSource(cfg)  # noqa: E731
+    return LiveFeed(source, draw_outlines=lambda img: robot_main.draw_face_outlines(cfg, img))
 
 
 def main():
@@ -309,10 +356,13 @@ def main():
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--config", help="config.toml to pass to main.py")
-    ap.add_argument("--fake-robot", action="store_true", help="pretend robot, no hardware")
+    ap.add_argument("--fake-robot", action="store_true",
+                    help="pretend robot and pretend camera, no hardware")
+    ap.add_argument("--no-camera", action="store_true", help="no live camera feed on the page")
     args = ap.parse_args()
     runner = FakeRunner() if args.fake_robot else MainRunner(args.config)
-    ctl = Controller(runner, args.config)
+    live = None if args.no_camera else make_live_feed(args.config, args.fake_robot)
+    ctl = Controller(runner, args.config, live)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(ctl))
     where = "localhost" if args.host in ("0.0.0.0", "") else args.host
     print(f"Robot dashboard on http://{where}:{args.port}"

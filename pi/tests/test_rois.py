@@ -34,9 +34,18 @@ def test_readable_stickers_scan_in_four_photos(tmp_path):
 
 
 def _sample(img, rois):
+    """sample_lab with a stand-in cv2 (Lab = the pixel values); the real cv2,
+    if any, is put back afterwards so later tests are not affected."""
+    saved = sys.modules.get("cv2")
     sys.modules["cv2"] = types.SimpleNamespace(cvtColor=lambda im, code: im, COLOR_BGR2LAB=0)
-    from rubik.vision import sample_lab
-    return sample_lab(img, rois)
+    try:
+        from rubik.vision import sample_lab
+        return sample_lab(img, rois)
+    finally:
+        if saved is None:
+            del sys.modules["cv2"]
+        else:
+            sys.modules["cv2"] = saved
 
 
 def test_points_scale_to_the_camera_resolution():

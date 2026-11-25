@@ -19,6 +19,24 @@ shown on the 3D cube first, then sent to the robot.**
 turned since. Otherwise `main.py solve` scans the cube first. A scan always
 ends with the scan moves undone, so the cube is back in its scramble.
 
+## Live camera
+
+The **Live camera** panel shows what the robot's camera sees, with the face
+outlines and sticker boxes drawn on (**Outlines: on/off**). It uses the same
+field of view and the iso / shutter / white balance fixed in `config.toml`
+`[camera]`, so it looks like the photos a scan takes.
+
+- The camera is opened only while the page is showing the feed. About 5 s after
+  the last viewer leaves (or presses **Pause feed**) it is closed again.
+- While **Read cube** or **Solve cube** takes photos, the feed shows *Camera in
+  use* and hands the camera to `main.py`; it comes back afterwards. Moves
+  (Scramble, Live clicks, the solution) do not need the camera, so you can
+  watch the robot turn the cube.
+- To run `main.py read`, `solve`, `calibrate-colours` or `exposure_sweep.py` by
+  hand while the dashboard is open, press **Pause feed** first (or close the
+  page).
+- `--no-camera` starts the dashboard without the feed.
+
 ## Clicking faces: two modes
 
 Click a face of the 3D cube (not the top face, which has no motor) to turn it
