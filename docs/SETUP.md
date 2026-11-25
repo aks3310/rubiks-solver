@@ -181,7 +181,7 @@ python -m pytest -q
 python main.py simulate -n 20
 ```
 
-Expect `82 passed` (it takes about a minute: some tests search scan plans) and
+Expect `86 passed` (it takes about a minute: some tests search scan plans) and
 `20/20 solved in simulation`. The first solve builds Kociemba's tables (a few
 seconds to a minute); later solves are fast.
 
@@ -546,20 +546,31 @@ It uses the `.venv` from part 4. Open `http://<pi-ip>:8080` on the laptop
 
 | Button | Runs | What you see |
 | --- | --- | --- |
-| 1 Scramble | random F/R/B/L/D moves, then `main.py --json move "<moves>"` | the moves on screen; the robot turns them, then the 3D cube does |
+| 1 Scramble | random F/R/B/L/D moves, then `main.py --json move "<moves>"` | the moves on screen; the 3D cube turns through them, then the robot does |
 | 2 Read cube | `main.py --json read` | the scan (moves undone afterwards); the state read on the 3D cube, the 54 letters and the least certain stickers |
-| 3 Solve cube | `main.py --json solve --state <last read>` | the solver's moves, the robot steps, and scan / software / motion times; the 3D cube turns to solved |
+| 3 Solve cube | `main.py --json solve --dry-run --state <last read>`, then `main.py --json move "<solution steps>"` | the solution is shown on the 3D cube first, then turned by the robot; the solver's moves, the robot steps, and scan / software / motion times |
+| Motors on / off (top right) | `main.py --json motors on` / `off` | the indicator: *Motors: on*, *off*, or *unknown* before anything has run |
 
-- **Solve uses the last Read** if the cube has not been scrambled since. After a
-  Scramble, Solve scans the cube first (the times show the scan).
+**Clicking faces** turns them 90° clockwise (not the top face):
+
+- **Mode 1 · Live:** the 3D cube turns the face, then the robot does (one
+  `main.py move` per click, about 2 s each; fast clicks are queued).
+- **Mode 2 · Record** (default): clicks only turn the 3D cube and build a move
+  string; **Send to robot** sends it all at once. **Undo last** / **Clear**
+  edit it (Clear puts the 3D cube back).
+
+- **Solve uses the last Read** if the cube has not been turned since. After a
+  Scramble or a sent move, Solve scans the cube first (the times show the scan).
 - **Load the cube as set in `[cube]` in `config.toml`** (white on top, green at the front by default), as for every run. The page shows the colours it expects.
-- **The top (white) face is fixed:** scrambles never use U, and the 3D cube can
-  only be turned by these buttons (drag it to look around).
+- **The top face is fixed:** scrambles never use U, and clicking the top face
+  of the 3D cube only shows a note (drag the cube to look around).
 - **One command at a time:** while one runs, the buttons are disabled and a
   second browser gets *the robot is busy*. The output of each `main.py` run is
   shown under **main.py output**, including any error.
 - Each button opens the USB link fresh, which restarts the MKS (about 2 s), and
-  Read starts the camera fresh. This is outside the timed part of a solve.
+  Read starts the camera fresh. Solve finds the solution and turns it in two
+  `main.py` runs, so there is one such restart between them; the motion time
+  shown is the board's own measurement of the solution.
 - **Do not run `main.py` robot commands by hand while a button is running**:
   both need the USB link and the camera.
 

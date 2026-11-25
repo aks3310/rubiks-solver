@@ -5,17 +5,33 @@ browser on the same network: `http://<pi-ip>:8080` (find the IP with
 `hostname -I` on the Pi).
 
 Every button runs `main.py`, so it behaves exactly like the command line
-(same `config.toml`, speed, overshoot, scan plan and solver):
+(same `config.toml`, speed, overshoot, scan plan and solver). **Every move is
+shown on the 3D cube first, then sent to the robot.**
 
 | Button | Runs | What you see |
 | --- | --- | --- |
-| 1 Scramble | `python main.py --json move "<moves>"` | random moves (F R B L D only), shown on screen, turned by the robot and on the 3D cube |
+| 1 Scramble | `python main.py --json move "<moves>"` | random moves (F R B L D only) on screen; the 3D cube turns through them, then the robot does |
 | 2 Read cube | `python main.py --json read` | the camera scan; the state read is shown on the 3D cube and in the facelets box |
-| 3 Solve cube | `python main.py --json solve --state <read state>` | solution string, robot steps and times; the 3D cube turns to solved |
+| 3 Solve cube | `python main.py --json solve --dry-run --state <read state>`, then `python main.py --json move "<solution steps>"` | the solution is found, shown on the 3D cube, then turned by the robot; solution string, robot steps and times |
+| Motors on / off | `python main.py --json motors on` / `off` | the indicator at the top right: *Motors: on* (green), *off* (red) or *unknown* (nothing run yet). Any move turns the motors on |
 
 **Solve** uses the state from the last **Read** if the cube has not been
-scrambled since. Otherwise `main.py solve` scans the cube first. A scan always
+turned since. Otherwise `main.py solve` scans the cube first. A scan always
 ends with the scan moves undone, so the cube is back in its scramble.
+
+## Clicking faces: two modes
+
+Click a face of the 3D cube (not the top face, which has no motor) to turn it
+90° clockwise. Drag to look around the cube.
+
+- **Mode 1 · Live:** each click turns the face on the 3D cube, then the robot
+  turns the same face (`main.py move "<face>"`). Fast clicks are queued and
+  sent in order. Each one opens the USB link (about 2 s per click).
+- **Mode 2 · Record** (the default): clicks turn the 3D cube only and build a
+  move string. **Send to robot** sends the whole string as one
+  `main.py move`. **Undo last** and **Clear** change the string (Clear puts the
+  3D cube back where it was). Scramble, Read and Solve wait until the recorded
+  moves are sent or cleared; switching to Live asks before discarding them.
 
 Only one command runs at a time. While the dashboard is running, do not run
 `main.py` robot commands by hand (both need the USB link and the camera).
