@@ -21,6 +21,14 @@ roi_radius = 6             # half-size of the square sampled around each sticker
 full_fov = false           # true = use the whole sensor (binned 2304x1296 mode), not a cropped mode
 settle_s = 0.25            # wait after a move before the photo
 # lens_position = 6.5      # dioptres (1 / distance in m). Leave out to autofocus once.
+# Fixed exposure, the same in every run (calibration, read, solve, dashboard).
+# Pick them with exposure_sweep.py. Anything left out (commented) is chosen
+# automatically when the camera starts and held for that run only, which can
+# differ between calibration and a solve (red/orange mix-ups). After changing
+# them, run calibrate-colours again.
+# iso = 200                # 100-1600; 100 = analogue gain 1.0
+# shutter = "1/250"        # "1/250" or microseconds, e.g. 4000
+# white_balance = [1.9, 1.6]   # red and blue colour gains (green = 1.0)
 
 [motion]
 # Firmware runs 1/8 microstepping: 400 steps per quarter turn.
