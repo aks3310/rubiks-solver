@@ -16,6 +16,8 @@ page shows each move on its 3D cube first, then sends it to the robot:
                   was last turned), shown on the 3D cube, then
                   python main.py --json move "<solution steps>"
     Motors    ->  python main.py --json motors on|off
+    Calibrate ->  python main.py --json calibrate-colours --no-confirm [--scrambled]
+                  (no key presses; the pause after each turn stays)
 
 The page also shows a live camera feed (/stream.mjpg, with the face outlines
 if ?outlines=1). The camera is opened only while someone watches, and is
@@ -44,7 +46,7 @@ HERE = Path(__file__).resolve().parent
 PAGE = HERE / "web" / "index.html"
 SOLVED = "U" * 9 + "R" * 9 + "F" * 9 + "D" * 9 + "L" * 9 + "B" * 9
 MOVE_RE = re.compile(r"^[FRBLD](2|')?$")      # no U: the top face has no motor
-TIMEOUT_S = {"move": 120, "read": 300, "solve": 400, "motors": 60}
+TIMEOUT_S = {"move": 120, "read": 300, "solve": 400, "motors": 60, "calibrate-colours": 900}
 USES_CAMERA = ("read", "solve", "calibrate-colours")    # main.py commands that take photos
 
 
@@ -104,6 +106,18 @@ class FakeRunner:
                 f"[pretend robot] done: {len(tokens)} move(s)"
         if args[0] == "motors":
             return {"ok": True, "motors": args[1] == "on"}, f"[pretend robot] motors {args[1]}"
+        if args[0] == "calibrate-colours":
+            scrambled = "--scrambled" in args
+            if not scrambled and self.state != SOLVED:
+                return {"ok": False, "error": "the pretend cube is not solved: use 'scrambled'"}, ""
+            return {"ok": True, "scrambled": scrambled,
+                    "facelets": self.state if scrambled else None,
+                    "closest": [{"faces": "F-D", "colours": "green-yellow", "distance": 32.1},
+                                {"faces": "R-L", "colours": "red-orange", "distance": 38.4},
+                                {"faces": "U-D", "colours": "white-yellow", "distance": 42.7}],
+                    "too_similar": False,
+                    "camera": "ISO 130, 1/127 s (7900 us), white balance 2.05/1.45",
+                    "camera_saved": True, "photos": "logs/calib"},                 "[pretend robot] reference colours saved"
         if args[0] == "read":
             return {"ok": True, "facelets": self.state, "valid": True,
                     "least_certain": ["D2", "B4", "R6"], "scan_s": 3.1,
@@ -173,7 +187,7 @@ class Controller:
             result, log = self.runner.run(args)
             self.last_log = log
             result["log"] = log[-4000:]
-            if result.get("ok") and args[0] in ("move", "read", "solve"):
+            if result.get("ok") and args[0] in ("move", "read", "solve", "calibrate-colours"):
                 self.motors = True               # main.py turns the motors on to move
             return (200 if result.get("ok") else 422), result
         finally:
@@ -239,6 +253,14 @@ class Controller:
         if result.get("ok"):
             self.motors = on
         return code, result
+
+    def calibrate(self, scrambled) -> tuple[int, dict]:
+        """calibrate-colours without key presses. The cube is turned back as
+        it was loaded, so what was read stays valid."""
+        if not isinstance(scrambled, bool):
+            return 422, {"ok": False, "error": "send {\"scrambled\": true} or {\"scrambled\": false}"}
+        args = ["calibrate-colours", "--no-confirm"] + (["--scrambled"] if scrambled else [])
+        return self._run("calibrating the colours", args)
 
     def solve(self) -> tuple[int, dict]:
         args = ["solve"] + (["--state", self.read_state] if self.read_state else [])
@@ -323,6 +345,8 @@ def make_handler(ctl: Controller):
                 self._reply(*ctl.run_solution())
             elif route == "/api/motors":
                 self._reply(*ctl.set_motors(body.get("on")))
+            elif route == "/api/calibrate":
+                self._reply(*ctl.calibrate(body.get("scrambled", False)))
             elif route == "/api/solve":           # find and run in one step
                 self._reply(*ctl.solve())
             else:
