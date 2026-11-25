@@ -68,3 +68,10 @@ def test_main_saves_what_the_calibration_used(tmp_path):
                                      "ColourGains": (2.0512, 1.4488)})
     cam = main.load_config(str(path))["camera"]
     assert (cam["iso"], cam["shutter"], cam["white_balance"]) == (130, 7900, [2.0512, 1.4488])
+
+
+def test_calibration_lets_the_camera_choose_unless_switched_off():
+    import main
+    assert main.calibration_picks_camera({}) is True
+    assert main.calibration_picks_camera({"calibration": {"auto_camera": True}}) is True
+    assert main.calibration_picks_camera({"calibration": {"auto_camera": False}}) is False
