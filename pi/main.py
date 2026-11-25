@@ -122,8 +122,12 @@ def open_camera(cfg, fixed: bool = True):
     cam = Camera(c["width"], c["height"], c.get("lens_position"),
                  full_fov=c.get("full_fov", False), **settings)
     names = {"gain": "ISO", "shutter_us": "shutter", "colour_gains": "white balance"}
-    how = ("fixed: " + ", ".join(names[k] for k in settings) if settings
-           else "automatic (set iso / shutter / white_balance in config.toml [camera] to fix them)")
+    if not fixed:
+        how = "automatic"
+    elif settings:
+        how = "fixed: " + ", ".join(names[k] for k in settings)
+    else:
+        how = "automatic (set iso / shutter / white_balance in config.toml [camera] to fix them)"
     if settings and len(settings) < 3:
         how += "; the rest automatic"
     print(f"camera: {describe_camera(cam.locked)}  ({how})")
@@ -144,6 +148,13 @@ def save_camera_to_config(cfg, locked: dict) -> None:
                      note="set by calibrate-colours " + time.strftime("%Y-%m-%d %H:%M"))
     print(f"camera settings written to {Path(path).name} [camera]: {describe_camera(locked)}. "
           "Every run now uses them.")
+
+
+def calibration_picks_camera(cfg) -> bool:
+    """[calibration] auto_camera (default true): calibrate-colours lets the
+    camera choose ISO, shutter and white balance afresh every time (ignoring
+    [camera]), and save_camera then writes the new choice into [camera]."""
+    return bool(cfg.get("calibration", {}).get("auto_camera", True))
 
 
 def check_camera_matches_calibration(cfg, cam) -> None:
@@ -545,7 +556,11 @@ def cmd_calibrate_colours(cfg, args):
     if confirm:
         print("Each turn waits for a key press. Check the face landed square before "
               "pressing; Ctrl+C stops.")
-    robot, cam = open_robot(cfg), open_camera(cfg)
+    auto_camera = calibration_picks_camera(cfg)
+    if auto_camera:
+        print("The camera chooses ISO, shutter and white balance afresh for this calibration "
+              "([calibration] auto_camera = true).")
+    robot, cam = open_robot(cfg), open_camera(cfg, fixed=not auto_camera)
     try:
         camera_used = dict(cam.locked)
         samples = run_scan(cfg, robot, cam, rois, steps, HERE / "logs" / "calib",

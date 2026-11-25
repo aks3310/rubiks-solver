@@ -181,7 +181,7 @@ python -m pytest -q
 python main.py simulate -n 20
 ```
 
-Expect `122 passed` (it takes about a minute: some tests search scan plans) and
+Expect `123 passed` (it takes about a minute: some tests search scan plans) and
 `20/20 solved in simulation`. The first solve builds Kociemba's tables (a few
 seconds to a minute); later solves are fast.
 
@@ -243,8 +243,10 @@ Without fixed values the camera picks ISO, shutter speed and white balance
 itself every time it starts, so calibration and a later solve can see slightly
 different colours (red and orange suffer most). So:
 
-**`calibrate-colours` fixes them for you.** After it saves the colours it
-writes the camera settings it used into `pi/config.toml` → `[camera]`:
+**`calibrate-colours` fixes them for you.** Every time it runs, the camera
+chooses ISO, shutter and white balance afresh for the current light (it does
+not reuse the old values). After it saves the colours it writes that choice
+into `pi/config.toml` → `[camera]`:
 
 ```toml
 iso = 130   # set by calibrate-colours 2026-11-25 15:10
@@ -253,7 +255,7 @@ white_balance = [2.05, 1.45]   # set by calibrate-colours 2026-11-25 15:10
 ```
 
 Every later run (`read`, `solve`, the dashboard) then uses exactly these.
-`[calibration] save_camera = false` turns this off.
+`[calibration] save_camera = false` stops it writing them.
 
 **To choose better values** (less glare, red and orange more different):
 
@@ -269,14 +271,13 @@ Every later run (`read`, `solve`, the dashboard) then uses exactly these.
    `summary.csv`, in `pi/logs/sweep-<date-time>/`. It suggests the lowest ISO
    without glare in the sticker boxes; pick the white balance where red and
    orange look most different.
-2. Put the chosen values in `[camera]` (`shutter` can also be `"1/250"`).
-3. Run `calibrate-colours` again: it keeps your values and records the
-   colours with them.
+2. Put the chosen values in `[camera]` (`shutter` can also be `"1/250"`), and
+   add `auto_camera = false` under `[calibration]` so calibration keeps them
+   instead of choosing its own.
+3. Run `calibrate-colours` again: it records the colours with your values.
 
-**To let the camera choose afresh** (for example after changing the lighting),
-comment the three lines out and run `calibrate-colours`; it writes its new
-choice back. `read` / `solve` print a **WARNING** whenever their camera
-settings differ from the calibration's.
+`read` / `solve` print a **WARNING** whenever their camera settings differ
+from the calibration's.
 
 Every run prints the settings it uses, for example
 `camera: ISO 200, 1/250 s (4000 us), white balance 1.90/1.60  (fixed: ISO, shutter, white balance)`.
