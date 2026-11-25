@@ -581,7 +581,7 @@ def scan_cube(cfg, robot, cam, stamp: str):
     """Scan (photos, then the scan moves are undone, so the cube is back in
     the scramble it was given) and work out the colours.
     Returns (facelets, least certain stickers, scan seconds)."""
-    from rubik.vision import classify, collect_observations, load_references
+    from rubik.vision import classify, classify_adaptive, collect_observations, load_references
     fc = cube_colours(cfg)
     rois, steps = _scan_setup(cfg)
     colours = cfg_path(cfg, "colours")
@@ -595,7 +595,19 @@ def scan_cube(cfg, robot, cam, stamp: str):
     samples = run_scan(cfg, robot, cam, rois, steps, HERE / "logs" / stamp,
                        turn_delay_s=cfg["scan"].get("turn_delay_s", 0.0))
     scan_s = time.time() - t0
-    original, conf = classify(collect_observations(samples, steps), refs)
+    obs = collect_observations(samples, steps)
+    if cfg["scan"].get("adaptive_colours", True):
+        # group this scan's own colours (k-means, 8 per colour), named by the
+        # calibration: follows small lighting changes since calibrate-colours
+        original, conf, info = classify_adaptive(obs, refs)
+        drift = info["drift"]
+        print(f"colours: grouped per scan ({info['method']}); drift from calibration: "
+              + ", ".join(f"{f} {fc[f]} {drift[f]:.0f}" for f in FACES))
+        if max(drift.values()) > 25:
+            print("WARNING: the colours moved a lot since calibration (light or camera "
+                  "changed?). If cubes are misread, run calibrate-colours again.")
+    else:
+        original, conf = classify(obs, refs)
     print("detected cube:\n" + net(original, colours=True, ansi=sys.stdout.isatty(),
                                      face_colour=fc))
     worst = sorted(conf.items(), key=lambda kv: -kv[1])[:3]

@@ -278,6 +278,28 @@ def srgb_to_cv_lab(rgb) -> np.ndarray:
     return np.array([L * 255 / 100, a + 128, b + 128])
 
 
+def equal_size_groups(feats: np.ndarray, centres: np.ndarray, max_iter: int = 30
+                      ) -> tuple[np.ndarray, np.ndarray]:
+    """Equal-size k-means: split the 48 sticker colours into 6 groups of
+    exactly 8 (a cube has 8 movable stickers of each colour). Start from
+    `centres` (6 x 3 Lab); repeat: give each sticker a group (Hungarian
+    assignment, 8 per group), move each centre to its group's mean, until no
+    sticker changes group. Returns (group of each sticker, final centres)."""
+    from scipy.optimize import linear_sum_assignment
+    centres = np.array(centres, dtype=float)
+    group = None
+    for _ in range(max_iter):
+        dist = np.linalg.norm(feats[:, None, :] - centres[None, :, :], axis=2)
+        rows, cols = linear_sum_assignment(np.repeat(dist, 8, axis=1))
+        new = np.empty(len(feats), dtype=int)
+        new[rows] = cols // 8
+        if group is not None and np.array_equal(new, group):
+            break
+        group = new
+        centres = np.array([feats[group == k].mean(axis=0) for k in range(6)])
+    return group, centres
+
+
 def references_from_scrambled(obs: dict[int, list[np.ndarray]],
                               face_colour: dict[str, str] = FACE_COLOUR,
                               is_valid=None, max_iter: int = 30
@@ -292,7 +314,6 @@ def references_from_scrambled(obs: dict[int, list[np.ndarray]],
     swap. Returns (references, detected 54-letter state).
     """
     from itertools import permutations
-    from scipy.optimize import linear_sum_assignment
     positions = sorted(p for p in range(54) if p not in CENTRES)
     missing = [p for p in positions if p not in obs]
     if missing:
@@ -301,17 +322,7 @@ def references_from_scrambled(obs: dict[int, list[np.ndarray]],
     nominal = np.array([srgb_to_cv_lab(NOMINAL_RGB[face_colour[f]]) for f in FACES])
 
     # 1. split into 6 groups of exactly 8, starting from the typical colours
-    centres = nominal.copy()
-    group = None
-    for _ in range(max_iter):
-        dist = np.linalg.norm(feats[:, None, :] - centres[None, :, :], axis=2)
-        rows, cols = linear_sum_assignment(np.repeat(dist, 8, axis=1))
-        new = np.empty(48, dtype=int)
-        new[rows] = cols // 8
-        if group is not None and np.array_equal(new, group):
-            break
-        group = new
-        centres = np.array([feats[group == k].mean(axis=0) for k in range(6)])
+    group, centres = equal_size_groups(feats, nominal, max_iter)
 
     # 2. name the groups: try namings from most to least likely
     name_cost = np.linalg.norm(centres[:, None, :] - nominal[None, :, :], axis=2)
@@ -363,6 +374,61 @@ def classify(obs: dict[int, list[np.ndarray]], refs: dict[str, list[float]]
         state[p] = FACES[c // 8]
         conf[p] = float(cost[r, c])
     return "".join(state), conf
+
+
+def classify_adaptive(obs: dict[int, list[np.ndarray]], refs: dict[str, list[float]],
+                      is_valid=None, max_iter: int = 30, max_namings: int = 24
+                      ) -> tuple[str, dict[int, float], dict]:
+    """Classify a scan by grouping ITS OWN sticker colours (equal-size
+    k-means, 6 groups of 8), starting from the calibrated references. The
+    groups follow this scan's lighting, so a small change since calibration
+    (warmer light, a different camera setting) does not push red stickers
+    over to orange. Each group is then named after the reference it is
+    closest to; if that is not a real cube (is_valid, default Kociemba), the
+    next most likely naming is tried, then the plain fixed-reference result.
+
+    Returns (54-letter state, distance of each sticker to its group centre,
+    info): info["method"] is "adaptive", "adaptive, renamed" or "fixed";
+    info["drift"][face] is how far that face's colour moved from its
+    calibrated reference (Lab units)."""
+    from itertools import permutations
+    from scipy.optimize import linear_sum_assignment
+    positions = sorted(p for p in range(54) if p not in CENTRES)
+    missing = [p for p in positions if p not in obs]
+    if missing:
+        raise ValueError(f"{len(missing)} stickers were never seen")
+    if is_valid is None:
+        is_valid = _kociemba_valid
+    feats = np.array([np.mean(obs[p], axis=0) for p in positions])      # 48 x 3
+    ref = np.array([refs[f] for f in FACES], dtype=float)               # 6 x 3
+    group, centres = equal_size_groups(feats, ref, max_iter)
+    name_cost = np.linalg.norm(centres[:, None, :] - ref[None, :, :], axis=2)   # group x face
+    r, c = linear_sum_assignment(name_cost)
+    best = tuple(int(c[list(r).index(k)]) for k in range(6))
+    others = sorted((pm for pm in permutations(range(6)) if pm != best),
+                    key=lambda pm: sum(name_cost[k, pm[k]] for k in range(6)))
+    conf = {p: float(np.linalg.norm(feats[i] - centres[group[i]])) for i, p in enumerate(positions)}
+
+    def state_for(naming):
+        st = [FACES[i // 9] for i in range(54)]          # centres keep their own face
+        for i, p in enumerate(positions):
+            st[p] = FACES[naming[group[i]]]
+        return "".join(st)
+
+    def drift(naming):
+        return {FACES[naming[k]]: round(float(name_cost[k, naming[k]]), 1) for k in range(6)}
+
+    state = state_for(best)
+    if is_valid(state):
+        return state, conf, {"method": "adaptive", "drift": drift(best)}
+    fixed_state, fixed_conf = classify(obs, refs)
+    if is_valid(fixed_state):
+        return fixed_state, fixed_conf, {"method": "fixed", "drift": drift(best)}
+    for naming in others[:max_namings]:
+        alt = state_for(naming)
+        if is_valid(alt):
+            return alt, conf, {"method": "adaptive, renamed", "drift": drift(naming)}
+    return state, conf, {"method": "adaptive", "drift": drift(best)}    # solve will report it
 
 
 def save_references(path: str | Path, refs: dict[str, list[float]],
