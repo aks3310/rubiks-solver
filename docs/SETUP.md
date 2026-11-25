@@ -181,7 +181,7 @@ python -m pytest -q
 python main.py simulate -n 20
 ```
 
-Expect `116 passed` (it takes about a minute: some tests search scan plans) and
+Expect `122 passed` (it takes about a minute: some tests search scan plans) and
 `20/20 solved in simulation`. The first solve builds Kociemba's tables (a few
 seconds to a minute); later solves are fast.
 
@@ -603,6 +603,12 @@ It uses the `.venv` from part 4. Open `http://<pi-ip>:8080` on the laptop
 | 3 Solve cube | `main.py --json solve --dry-run --state <last read>`, then `main.py --json move "<solution steps>"` | the solution is shown on the 3D cube first, then turned by the robot; the solver's moves, the robot steps, and scan / software / motion times |
 | Motors on / off (top right) | `main.py --json motors on` / `off` | the indicator: *Motors: on*, *off*, or *unknown* before anything has run |
 
+**Live camera:** the page shows the camera's view with the face outlines
+(**Outlines: on/off**). The camera is opened only while someone watches; during
+Read / Solve photos the feed shows *Camera in use* and hands the camera to
+`main.py`. Press **Pause feed** before running `main.py` camera commands or
+`exposure_sweep.py` by hand. `./run_ui.sh --no-camera` turns the feed off.
+
 **Clicking faces** turns them 90° clockwise (not the top face):
 
 - **Mode 1 · Live:** the 3D cube turns the face, then the robot does (one
@@ -726,6 +732,6 @@ needs the bundled solver folder there too (otherwise it says *Solver offline*).
 | `python main.py solve --state <54 letters>` | Solve and execute a known state, no scan |
 | `python main.py --json <command>` | Also end with one `RESULT {...}` line (used by the dashboard) |
 | `./run_ui.sh` | Start the robot dashboard on port 8080 (part 10) |
-| `python web_app.py --fake-robot` | The dashboard with a pretend robot, no hardware |
+| `python web_app.py --fake-robot` | The dashboard with a pretend robot and camera, no hardware |
 | `python main.py bench [--speed --accel]` | Time the motors for speed tuning |
 | `python -m pytest -q` | Run the unit tests |
