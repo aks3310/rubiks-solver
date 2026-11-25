@@ -181,7 +181,7 @@ python -m pytest -q
 python main.py simulate -n 20
 ```
 
-Expect `123 passed` (it takes about a minute: some tests search scan plans) and
+Expect `124 passed` (it takes about a minute: some tests search scan plans) and
 `20/20 solved in simulation`. The first solve builds Kociemba's tables (a few
 seconds to a minute); later solves are fast.
 
@@ -603,6 +603,7 @@ It uses the `.venv` from part 4. Open `http://<pi-ip>:8080` on the laptop
 | 2 Read cube | `main.py --json read` | the scan (moves undone afterwards); the state read on the 3D cube, the 54 letters and the least certain stickers |
 | 3 Solve cube | `main.py --json solve --dry-run --state <last read>`, then `main.py --json move "<solution steps>"` | the solution is shown on the 3D cube first, then turned by the robot; the solver's moves, the robot steps, and scan / software / motion times |
 | Motors on / off (top right) | `main.py --json motors on` / `off` | the indicator: *Motors: on*, *off*, or *unknown* before anything has run |
+| Calibrate colours (panel) | `main.py --json calibrate-colours --no-confirm` (`--scrambled` if ticked) | the same calibration as part 7b, without key presses; shows the closest colour pairs and the camera settings it saved |
 
 **Live camera:** the page shows the camera's view with the face outlines
 (**Outlines: on/off**). The camera is opened only while someone watches; during

@@ -136,3 +136,17 @@ def test_parse_result_from_main_py_output():
     assert parse_result(out, 0, out) == {"ok": True, "motion_ms": 12}
     bad = parse_result("Traceback ...\nSerialException: no port\n", 1, "SerialException: no port")
     assert bad["ok"] is False and "no port" in bad["error"]
+
+
+def test_calibrate_from_the_dashboard(server):
+    url, ctl = server
+    code, r = call(url, "/api/calibrate", {"scrambled": False})
+    assert code == 200 and r["ok"] and r["closest"][0]["distance"] > 15 and r["camera_saved"]
+    assert ctl.status()["motors"] is True
+    call(url, "/api/scramble", {"moves": ["R", "F"]})
+    code, r = call(url, "/api/calibrate", {"scrambled": False})   # not solved any more
+    assert code == 422 and "scrambled" in r["error"]
+    code, r = call(url, "/api/calibrate", {"scrambled": True})
+    assert code == 200 and r["facelets"] == ctl.runner.state
+    code, r = call(url, "/api/calibrate", {"scrambled": "yes"})
+    assert code == 422

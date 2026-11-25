@@ -552,7 +552,7 @@ def cmd_calibrate_colours(cfg, args):
     cal = cfg.get("calibration", {})
     parallel = cal.get("parallel_opposite", False)
     delay = cal.get("turn_delay_s", 1.0)
-    confirm = cal.get("confirm_each_turn", True)
+    confirm = cal.get("confirm_each_turn", True) and not getattr(args, "no_confirm", False)
     if confirm:
         print("Each turn waits for a key press. Check the face landed square before "
               "pressing; Ctrl+C stops.")
@@ -573,14 +573,15 @@ def cmd_calibrate_colours(cfg, args):
         try:
             refs, state = references_from_scrambled(obs, face_colour=fc)
         except ValueError as e:
-            print(f"Calibration failed: {e}")
-            sys.exit(2)
+            raise CommandFailed(f"Calibration failed: {e}")
         print("detected cube (check it matches the real cube):\n"
               + net(state, colours=True, ansi=sys.stdout.isatty(), face_colour=fc))
     else:
+        state = None
         refs = references_from_solved(obs)
     save_references(cfg_path(cfg, "colours"), refs, fc, camera=camera_used)
-    if camera_used and cfg.get("calibration", {}).get("save_camera", True):
+    camera_saved = bool(camera_used and cfg.get("calibration", {}).get("save_camera", True))
+    if camera_saved:
         save_camera_to_config(cfg, camera_used)
     names = list(refs)
     gaps = sorted((float(np.linalg.norm(np.subtract(refs[a], refs[b]))), a, b)
@@ -590,6 +591,13 @@ def cmd_calibrate_colours(cfg, args):
         print(f"  {a}-{b} ({fc[a]}-{fc[b]}): {d:.1f}")
     if gaps[0][0] < 15:
         print("WARNING: two faces look very similar - improve lighting and recalibrate")
+    from rubik.vision import describe_camera
+    emit(args, ok=True, scrambled=bool(args.scrambled), facelets=state,
+         closest=[{"faces": f"{a}-{b}", "colours": f"{fc[a]}-{fc[b]}", "distance": round(d, 1)}
+                  for d, a, b in gaps[:3]],
+         too_similar=gaps[0][0] < 15,
+         camera=describe_camera(camera_used) if camera_used else None,
+         camera_saved=camera_saved, photos="logs/calib")
 
 
 def scan_cube(cfg, robot, cam, stamp: str):
@@ -775,6 +783,8 @@ def main():
     p = sub.add_parser("calibrate-colours")
     p.add_argument("--scrambled", action="store_true",
                    help="cube does not need to be solved (still loaded as in [cube])")
+    p.add_argument("--no-confirm", action="store_true",
+                   help="no key press before each turn (the pause stays); used by the dashboard")
     sub.add_parser("read", help="scan the cube and print its state (cube ends as loaded)")
     p = sub.add_parser("solve")
     p.add_argument("--dry-run", action="store_true",

@@ -14,6 +14,7 @@ shown on the 3D cube first, then sent to the robot.**
 | 2 Read cube | `python main.py --json read` | the camera scan; the state read is shown on the 3D cube and in the facelets box |
 | 3 Solve cube | `python main.py --json solve --dry-run --state <read state>`, then `python main.py --json move "<solution steps>"` | the solution is found, shown on the 3D cube, then turned by the robot; solution string, robot steps and times |
 | Motors on / off | `python main.py --json motors on` / `off` | the indicator at the top right: *Motors: on* (green), *off* (red) or *unknown* (nothing run yet). Any move turns the motors on |
+| Calibrate colours (panel *Colour calibration*) | `python main.py --json calibrate-colours --no-confirm` (`--scrambled` if you tick *Cube is scrambled*) | asks you to confirm, then scans slowly (the pause after each turn stays, no key presses) and puts the cube back; shows the three closest colour pairs (under 15 is risky) and the camera settings saved to `config.toml`; with a scrambled cube the 3D cube shows what it detected |
 
 **Solve** uses the state from the last **Read** if the cube has not been
 turned since. Otherwise `main.py solve` scans the cube first. A scan always
