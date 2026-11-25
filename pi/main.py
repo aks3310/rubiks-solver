@@ -45,6 +45,7 @@ def load_config(path: str | None) -> dict:
     with open(p, "rb") as fh:
         cfg = tomllib.load(fh)
     cfg["_dir"] = p.parent
+    cfg["_path"] = p
     return cfg
 
 
@@ -127,6 +128,22 @@ def open_camera(cfg, fixed: bool = True):
         how += "; the rest automatic"
     print(f"camera: {describe_camera(cam.locked)}  ({how})")
     return cam
+
+
+def save_camera_to_config(cfg, locked: dict) -> None:
+    """Write the camera settings a calibration used into config.toml [camera]
+    (iso, shutter, white_balance), so every later run uses exactly them."""
+    from rubik.config_edit import set_keys_in_file
+    from rubik.vision import describe_camera
+    iso = round(float(locked["AnalogueGain"]) * 100, 1)
+    values = {"iso": int(iso) if iso == int(iso) else iso,
+              "shutter": int(locked["ExposureTime"]),
+              "white_balance": [round(float(g), 4) for g in locked["ColourGains"]]}
+    path = cfg.get("_path", cfg["_dir"] / "config.toml")
+    set_keys_in_file(path, "camera", values,
+                     note="set by calibrate-colours " + time.strftime("%Y-%m-%d %H:%M"))
+    print(f"camera settings written to {Path(path).name} [camera]: {describe_camera(locked)}. "
+          "Every run now uses them.")
 
 
 def check_camera_matches_calibration(cfg, cam) -> None:
@@ -548,6 +565,8 @@ def cmd_calibrate_colours(cfg, args):
     else:
         refs = references_from_solved(obs)
     save_references(cfg_path(cfg, "colours"), refs, fc, camera=camera_used)
+    if camera_used and cfg.get("calibration", {}).get("save_camera", True):
+        save_camera_to_config(cfg, camera_used)
     names = list(refs)
     gaps = sorted((float(np.linalg.norm(np.subtract(refs[a], refs[b]))), a, b)
                   for i, a in enumerate(names) for b in names[i + 1:])

@@ -22,10 +22,13 @@ full_fov = false           # true = use the whole sensor (binned 2304x1296 mode)
 settle_s = 0.25            # wait after a move before the photo
 # lens_position = 6.5      # dioptres (1 / distance in m). Leave out to autofocus once.
 # Fixed exposure, the same in every run (calibration, read, solve, dashboard).
-# Pick them with exposure_sweep.py. Anything left out (commented) is chosen
-# automatically when the camera starts and held for that run only, which can
-# differ between calibration and a solve (red/orange mix-ups). After changing
-# them, run calibrate-colours again.
+# calibrate-colours writes the three lines below by itself (the values it
+# calibrated with), so later runs match the calibration. Anything left out
+# (commented) is chosen automatically when the camera starts.
+#  - To use other values (e.g. picked with exposure_sweep.py): edit them, then
+#    run calibrate-colours again (it keeps them and records the colours).
+#  - To let the camera choose afresh (new lighting): comment the three lines
+#    out, then run calibrate-colours; it writes its new choice back.
 # iso = 200                # 100-1600; 100 = analogue gain 1.0
 # shutter = "1/250"        # "1/250" or microseconds, e.g. 4000
 # white_balance = [1.9, 1.6]   # red and blue colour gains (green = 1.0)
@@ -95,6 +98,7 @@ time_budget_s = 1.0        # stop trying orientations after this (software targe
 turn_delay_s = 1.0         # pause after every single turn
 parallel_opposite = false  # false = opposite faces never turn at the same time
 confirm_each_turn = true   # wait for a key press before every turn
+save_camera = true         # write the camera settings used into [camera] (iso, shutter, white_balance)
 
 [files]
 rois = "data/rois.json"
