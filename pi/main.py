@@ -108,11 +108,38 @@ def shake(robot, cfg, deg=None, cycles=None, faces=None) -> int:
                        faces if faces is not None else s.get("faces", "FRBLD"))
 
 
-def open_camera(cfg):
-    from rubik.vision import Camera
+def open_camera(cfg, fixed: bool = True):
+    """Start the camera. With fixed (default), the iso / shutter /
+    white_balance set in config.toml [camera] are used; anything not set is
+    the camera's automatic choice, held for this run."""
+    from rubik.vision import Camera, camera_settings, describe_camera
     c = cfg["camera"]
-    return Camera(c["width"], c["height"], c.get("lens_position"),
-                  full_fov=c.get("full_fov", False))
+    try:
+        settings = camera_settings(c) if fixed else {}
+    except ValueError as e:
+        raise CommandFailed(f"config.toml [camera]: {e}")
+    cam = Camera(c["width"], c["height"], c.get("lens_position"),
+                 full_fov=c.get("full_fov", False), **settings)
+    names = {"gain": "ISO", "shutter_us": "shutter", "colour_gains": "white balance"}
+    how = ("fixed: " + ", ".join(names[k] for k in settings) if settings
+           else "automatic (set iso / shutter / white_balance in config.toml [camera] to fix them)")
+    if settings and len(settings) < 3:
+        how += "; the rest automatic"
+    print(f"camera: {describe_camera(cam.locked)}  ({how})")
+    return cam
+
+
+def check_camera_matches_calibration(cfg, cam) -> None:
+    """Warn if this run's camera settings differ from calibrate-colours'."""
+    from rubik.vision import calibration_camera, camera_changes
+    saved = calibration_camera(cfg_path(cfg, "colours"))
+    if not saved:
+        return
+    changes = camera_changes(saved, cam.locked)
+    if changes:
+        print("WARNING: the camera settings differ from the colour calibration ("
+              + "; ".join(changes) + "). Colours may be misread (red/orange). Fix iso, shutter "
+              "and white_balance in config.toml [camera], then run calibrate-colours again.")
 
 
 # MKS socket of each face; must match the STEP pins in firmware/cube_firmware/config.h
@@ -425,26 +452,14 @@ def _scan_setup(cfg):
     return rois, steps
 
 
-def cmd_show_faces(cfg, args):
-    """Draw the face model (curved outlines, sticker grid, sampled patches) on a
-    camera photo, to check it still matches after moving anything."""
+def draw_face_outlines(cfg, img, scale=None, offset=None) -> None:
+    """Draw the face model on a BGR image in place: the curved face outlines
+    and sticker grid (R red, B blue, D yellow lines) and a labelled white box
+    where each read sticker is sampled. scale / offset default to config.toml."""
     import cv2
-    from rubik.face_model import FaceModel
-    if args.image:
-        img = cv2.imread(args.image)
-    else:
-        cam = open_camera(cfg)
-        img = cam.capture()
-        cam.close()
     h, w = img.shape[:2]
     sc = cfg["scan"]
-    scale = sc.get("face_scale", 1.0) if args.scale is None else args.scale
-    off = list(sc.get("face_offset", [0, 0]))
-    if args.dx is not None:
-        off[0] = args.dx
-    if args.dy is not None:
-        off[1] = args.dy
-    model = load_face_model(cfg, scale, off)
+    model = load_face_model(cfg, scale, offset)
     sx, sy = w / model.image_size[0], h / model.image_size[1]
     colour = {"R": (60, 60, 255), "B": (255, 140, 60), "D": (0, 220, 255)}   # BGR
     for face in "RBD":
@@ -460,6 +475,27 @@ def cmd_show_faces(cfg, args):
                     (0, 0, 0), 3, cv2.LINE_AA)
         cv2.putText(img, name, (int(x) - 12, int(y) + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     (255, 255, 255), 1, cv2.LINE_AA)
+
+
+def cmd_show_faces(cfg, args):
+    """Draw the face model (curved outlines, sticker grid, sampled patches) on a
+    camera photo, to check it still matches after moving anything."""
+    import cv2
+    if args.image:
+        img = cv2.imread(args.image)
+    else:
+        cam = open_camera(cfg)
+        img = cam.capture()
+        cam.close()
+    h, w = img.shape[:2]
+    sc = cfg["scan"]
+    scale = sc.get("face_scale", 1.0) if args.scale is None else args.scale
+    off = list(sc.get("face_offset", [0, 0]))
+    if args.dx is not None:
+        off[0] = args.dx
+    if args.dy is not None:
+        off[1] = args.dy
+    draw_face_outlines(cfg, img, scale, off)
     out = cfg_path(cfg, "faces").with_name("faces_check.jpg")
     out.parent.mkdir(parents=True, exist_ok=True)
     cv2.putText(img, f"face_scale = {scale:g}   face_offset = [{off[0]:g}, {off[1]:g}]   ({w}x{h})",
@@ -481,6 +517,7 @@ def cmd_calibrate_colours(cfg, args):
     """
     from rubik.vision import (collect_observations, references_from_scrambled,
                               references_from_solved, save_references)
+    camera_used = None
     fc = cube_colours(cfg)
     print(f"Cube must be loaded {loading_hint(cfg)} ([cube] in config.toml).")
     rois, steps = _scan_setup(cfg)
@@ -493,6 +530,7 @@ def cmd_calibrate_colours(cfg, args):
               "pressing; Ctrl+C stops.")
     robot, cam = open_robot(cfg), open_camera(cfg)
     try:
+        camera_used = dict(cam.locked)
         samples = run_scan(cfg, robot, cam, rois, steps, HERE / "logs" / "calib",
                            parallel=parallel, turn_delay_s=delay, confirm=confirm)
         obs = collect_observations(samples, steps)   # run_scan put the cube back
@@ -509,7 +547,7 @@ def cmd_calibrate_colours(cfg, args):
               + net(state, colours=True, ansi=sys.stdout.isatty(), face_colour=fc))
     else:
         refs = references_from_solved(obs)
-    save_references(cfg_path(cfg, "colours"), refs, fc)
+    save_references(cfg_path(cfg, "colours"), refs, fc, camera=camera_used)
     names = list(refs)
     gaps = sorted((float(np.linalg.norm(np.subtract(refs[a], refs[b]))), a, b)
                   for i, a in enumerate(names) for b in names[i + 1:])
@@ -533,6 +571,7 @@ def scan_cube(cfg, robot, cam, stamp: str):
     refs, note = load_references(colours, fc)
     if note:
         print(note)
+    check_camera_matches_calibration(cfg, cam)
     t0 = time.time()
     samples = run_scan(cfg, robot, cam, rois, steps, HERE / "logs" / stamp,
                        turn_delay_s=cfg["scan"].get("turn_delay_s", 0.0))

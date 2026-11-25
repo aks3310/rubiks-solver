@@ -277,18 +277,21 @@ def make_handler(ctl: Controller):
 
         def do_POST(self):
             route = urlparse(self.path).path
+            # Always read the request body, even when a route ignores it: closing
+            # a connection with unread data makes Windows reset it.
+            body = self._body()
             if route == "/api/scramble":
-                self._reply(*ctl.scramble(self._body().get("moves")))
+                self._reply(*ctl.scramble(body.get("moves")))
             elif route == "/api/read":
                 self._reply(*ctl.read())
             elif route == "/api/move":            # Live mode: one clicked face
-                self._reply(*ctl.scramble(self._body().get("moves"), "turning a face"))
+                self._reply(*ctl.scramble(body.get("moves"), "turning a face"))
             elif route == "/api/find-solution":
                 self._reply(*ctl.find_solution())
             elif route == "/api/run-solution":
                 self._reply(*ctl.run_solution())
             elif route == "/api/motors":
-                self._reply(*ctl.set_motors(self._body().get("on")))
+                self._reply(*ctl.set_motors(body.get("on")))
             elif route == "/api/solve":           # find and run in one step
                 self._reply(*ctl.solve())
             else:

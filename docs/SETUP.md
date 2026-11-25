@@ -181,7 +181,7 @@ python -m pytest -q
 python main.py simulate -n 20
 ```
 
-Expect `86 passed` (it takes about a minute: some tests search scan plans) and
+Expect `106 passed` (it takes about a minute: some tests search scan plans) and
 `20/20 solved in simulation`. The first solve builds Kociemba's tables (a few
 seconds to a minute); later solves are fast.
 
@@ -236,6 +236,41 @@ Colour reading depends on stable light more than anything else.
 
 The program locks exposure, white balance and focus after a 2-second warm-up,
 so the light must be on before you start it.
+
+### Fix ISO, shutter speed and white balance
+
+By default the camera picks ISO, shutter speed and white balance itself every
+time it starts, so calibration and a later solve can see slightly different
+colours (red and orange suffer most). Fix them instead:
+
+1. With the cube loaded and the light on, run the sweep (closes nothing else
+   for you: stop anything using the camera first):
+
+   ```bash
+   python exposure_sweep.py              # 5 ISO x 7 shutter x 3 white balances
+   ```
+
+   It saves every photo with the face outlines drawn and the settings written
+   on top, one contact sheet per white balance (`contact_wb-*.jpg`) and
+   `summary.csv`, in `pi/logs/sweep-<date-time>/`. It suggests the lowest ISO
+   without glare in the sticker boxes; pick the white balance where red and
+   orange look most different.
+2. Put the chosen values in `pi/config.toml`:
+
+   ```toml
+   [camera]
+   iso = 200                    # 100-1600
+   shutter = "1/250"            # or microseconds, e.g. 4000
+   white_balance = [1.9, 1.6]   # red and blue gains
+   ```
+
+   Anything left out stays automatic for that run.
+3. Run `calibrate-colours` again. It records the camera settings with the
+   colours, and `read` / `solve` print a **WARNING** if their camera settings
+   differ from the calibration's.
+
+Every run prints the settings it uses, for example
+`camera: ISO 200, 1/250 s (4000 us), white balance 1.90/1.60  (fixed: ISO, shutter, white balance)`.
 
 Stickers that still show glare (on this robot: the two far edge stickers on
 each of D, B and R) do not need to be fixed with lighting: they are left out of

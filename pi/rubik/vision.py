@@ -2,7 +2,8 @@
 
 * Camera: Raspberry Pi Camera Module 3 Wide through picamera2. Exposure,
   white balance and focus are locked after warm-up so colours do not drift
-  between the photos of one scan.
+  between the photos of one scan. ISO, shutter speed and white balance can be
+  fixed in config.toml [camera] so they are also the same in every run.
 * Sampling: each visible facelet has a pixel position (picked once with
   `main.py calibrate-rois`). We take the median colour of a small square
   around it and convert to CIELAB.
@@ -24,14 +25,79 @@ from .cube import CENTRES, FACES, STANDARD_SCHEME, facelet_index
 # ------------------------------------------------------------------ camera
 
 
+def parse_shutter_us(value) -> int:
+    """Shutter speed -> microseconds: "1/250" -> 4000; a number is microseconds."""
+    from fractions import Fraction
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        us = float(value)
+    else:
+        text = str(value).strip().lower().replace(" ", "").removesuffix("s").removesuffix("u")
+        try:
+            us = float(Fraction(text)) * 1_000_000 if "/" in text else float(text)
+        except (ValueError, ZeroDivisionError):
+            raise ValueError(f"shutter = {value!r}: use for example \"1/250\" or 4000 (microseconds)")
+    if not 10 <= us <= 1_000_000:
+        raise ValueError(f"shutter = {value!r}: between 1/100000 and 1 s")
+    return int(round(us))
+
+
+def camera_settings(cam_cfg: dict) -> dict:
+    """Fixed exposure settings from config.toml [camera] (anything left out
+    stays automatic): iso (100 = analogue gain 1.0), shutter ("1/250" or
+    microseconds) and white_balance ([red gain, blue gain])."""
+    out = {}
+    if cam_cfg.get("iso") is not None:
+        iso = float(cam_cfg["iso"])
+        if not 50 <= iso <= 3200:
+            raise ValueError(f"iso = {cam_cfg['iso']}: use 100-1600 (Camera Module 3)")
+        out["gain"] = iso / 100.0
+    if cam_cfg.get("shutter") is not None:
+        out["shutter_us"] = parse_shutter_us(cam_cfg["shutter"])
+    if cam_cfg.get("white_balance") is not None:
+        wb = cam_cfg["white_balance"]
+        if not (isinstance(wb, (list, tuple)) and len(wb) == 2
+                and all(isinstance(g, (int, float)) and 0.1 <= g <= 8 for g in wb)):
+            raise ValueError(f"white_balance = {wb!r}: use [red gain, blue gain], e.g. [1.9, 1.6]")
+        out["colour_gains"] = (float(wb[0]), float(wb[1]))
+    return out
+
+
+def describe_camera(s: dict) -> str:
+    """'ISO 200, 1/250 s, white balance 1.90/1.60' from locked camera settings."""
+    us = s["ExposureTime"]
+    r, b = s["ColourGains"]
+    return (f"ISO {s['AnalogueGain'] * 100:.0f}, 1/{round(1_000_000 / us)} s ({us} us), "
+            f"white balance {r:.2f}/{b:.2f}")
+
+
+def camera_changes(saved: dict, now: dict, tol: float = 0.08) -> list[str]:
+    """What differs (by more than tol) between two locked camera settings."""
+    out = []
+    if abs(now["ExposureTime"] - saved["ExposureTime"]) > tol * saved["ExposureTime"]:
+        out.append(f"shutter {saved['ExposureTime']} -> {now['ExposureTime']} us")
+    if abs(now["AnalogueGain"] - saved["AnalogueGain"]) > tol * saved["AnalogueGain"]:
+        out.append(f"ISO {saved['AnalogueGain'] * 100:.0f} -> {now['AnalogueGain'] * 100:.0f}")
+    (r0, b0), (r1, b1) = saved["ColourGains"], now["ColourGains"]
+    if abs(r1 - r0) > tol * r0 or abs(b1 - b0) > tol * b0:
+        out.append(f"white balance {r0:.2f}/{b0:.2f} -> {r1:.2f}/{b1:.2f}")
+    return out
+
+
 class Camera:
     def __init__(self, width: int = 1536, height: int = 864,
                  lens_position: float | None = None, warmup_s: float = 2.0,
-                 full_fov: bool = False):
+                 full_fov: bool = False, gain: float | None = None,
+                 shutter_us: int | None = None,
+                 colour_gains: tuple[float, float] | None = None):
         """full_fov: force the full-sensor 2x2-binned mode (Camera Module 3:
         2304x1296). Otherwise libcamera picks the mode from the output size,
-        and for 1536x864 that can be a cropped (zoomed-in) mode."""
+        and for 1536x864 that can be a cropped (zoomed-in) mode.
+        gain / shutter_us / colour_gains: fixed analogue gain (ISO / 100),
+        exposure time and white balance; None = the camera's automatic choice
+        after warm-up (see camera_settings)."""
         from picamera2 import Picamera2  # Pi only
+        self.fixed = {"AnalogueGain": gain, "ExposureTime": shutter_us,
+                      "ColourGains": tuple(colour_gains) if colour_gains else None}
         self.cam = Picamera2()
         kwargs = {"main": {"size": (width, height), "format": "RGB888"}}
         if full_fov:
@@ -55,18 +121,28 @@ class Camera:
             self.cam.autofocus_cycle()
             lens_position = self.cam.capture_metadata().get("LensPosition")
         md = self.cam.capture_metadata()
+        self.auto_choice = {k: md[k] for k in ("ExposureTime", "AnalogueGain", "ColourGains")}
         ctrl = {
             "AeEnable": False,
             "AwbEnable": False,
-            "ExposureTime": md["ExposureTime"],
-            "AnalogueGain": md["AnalogueGain"],
-            "ColourGains": md["ColourGains"],
+            "ExposureTime": int(self.fixed["ExposureTime"] or md["ExposureTime"]),
+            "AnalogueGain": float(self.fixed["AnalogueGain"] or md["AnalogueGain"]),
+            "ColourGains": tuple(self.fixed["ColourGains"] or md["ColourGains"]),
             "AfMode": controls.AfModeEnum.Manual,
         }
+        if self.fixed["ExposureTime"]:          # allow exposures longer than one frame
+            frame = max(33_333, ctrl["ExposureTime"] + 2_000)
+            ctrl["FrameDurationLimits"] = (frame, frame)
         if lens_position is not None:
             ctrl["LensPosition"] = lens_position
         self.cam.set_controls(ctrl)
         time.sleep(0.3)
+        # wait until frames really use the new settings (a few frames at most)
+        for _ in range(15):
+            md = self.cam.capture_metadata()
+            if not camera_changes(ctrl, {k: md.get(k, ctrl[k]) for k in
+                                         ("ExposureTime", "AnalogueGain", "ColourGains")}, 0.06):
+                break
         self.locked = ctrl
 
     def capture(self) -> np.ndarray:
@@ -290,10 +366,21 @@ def classify(obs: dict[int, list[np.ndarray]], refs: dict[str, list[float]]
 
 
 def save_references(path: str | Path, refs: dict[str, list[float]],
-                    face_colour: dict[str, str]) -> None:
+                    face_colour: dict[str, str], camera: dict | None = None) -> None:
     """Save one reference colour per face, plus which colour each face had
-    when calibrated (so a later change of loading orientation can be undone)."""
-    save_json(path, {**{f: list(refs[f]) for f in FACES}, "_face_colours": face_colour})
+    when calibrated (so a later change of loading orientation can be undone)
+    and the camera settings used (to warn when a later run differs)."""
+    data = {**{f: list(refs[f]) for f in FACES}, "_face_colours": face_colour}
+    if camera:
+        data["_camera"] = {"ExposureTime": int(camera["ExposureTime"]),
+                           "AnalogueGain": float(camera["AnalogueGain"]),
+                           "ColourGains": [float(g) for g in camera["ColourGains"]]}
+    save_json(path, data)
+
+
+def calibration_camera(path: str | Path) -> dict | None:
+    """The camera settings recorded by calibrate-colours, or None."""
+    return json.loads(Path(path).read_text()).get("_camera")
 
 
 def load_references(path: str | Path, face_colour: dict[str, str]
