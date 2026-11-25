@@ -181,7 +181,7 @@ python -m pytest -q
 python main.py simulate -n 20
 ```
 
-Expect `112 passed` (it takes about a minute: some tests search scan plans) and
+Expect `116 passed` (it takes about a minute: some tests search scan plans) and
 `20/20 solved in simulation`. The first solve builds Kociemba's tables (a few
 seconds to a minute); later solves are fast.
 
@@ -469,6 +469,12 @@ What happens:
    made so far are undone; if even that fails, the moves to do by hand are printed.
 2. **Software (timed):** the photos are turned into the original scramble,
    colours are named (exactly 8 stickers per colour), and Kociemba solves it.
+   With `[scan] adaptive_colours = true` (default) the scan's own 48 sticker
+   colours are grouped into 6 groups of 8 (k-means, starting from the
+   calibrated colours), so they follow small lighting changes since
+   calibration; each group is named after the calibrated colour it is closest
+   to. The output shows how far each colour moved
+   (`drift from calibration: U white 3, R red 5, ...`) and warns above 25.
    The 24 ways of holding the cube are tried (up to `time_budget_s`), every U
    turn is rewritten as `Y D Y` (`Y = R L' F2 B2 R L'`), opposite faces that
    follow each other turn together (`R+L'`), and 180° turns become two 90°

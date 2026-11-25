@@ -63,6 +63,11 @@ turn_delay_s = 0.0         # pause after each scan turn and each undo turn in `s
                            # Not timed and does not slow the solution. Calibration uses [calibration].
 max_seq_len = 3
 min_views = 1              # >1 = read each sticker that many times (greedy planner, more photos)
+# true: group each scan's own 48 sticker colours into 6 groups of 8 (k-means,
+# starting from the calibrated colours), so small lighting changes since
+# calibrate-colours do not mix up red and orange. false: compare every sticker
+# with the calibrated colours only.
+adaptive_colours = true
 min_photos = true          # try the 2-photo plan first (fewest photos possible)
 # Faces the camera can see: it sits at the back-bottom-right corner (D-B-R).
 # Used by calibrate-rois to ask for points. The D, B and R centres are behind
