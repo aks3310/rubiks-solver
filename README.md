@@ -1,5 +1,11 @@
 # Rubik's cube solver robot (TA6)
 
+## Watch it solve
+
+[![Rubik's cube solver robot: watch the video on YouTube](https://img.youtube.com/vi/wnTuuExPoho/maxresdefault.jpg)](https://www.youtube.com/watch?v=wnTuuExPoho)
+
+*Click the picture to play the video on YouTube.*
+
 This repository combines two projects for the same five-motor robot:
 
 | Folder | What it is | From |
